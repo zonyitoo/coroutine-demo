@@ -1,0 +1,19 @@
+[package]
+name = "Coro"
+version = "0.1.0"
+authors = ["Y. T. Chung <zonyitoo@gmail.com>"]
+
+[[bin]]
+name = "coro"
+
+[dependencies]
+coroutine = "*"
+num_cpus = "*"
+deque = "*"
+log = "*"
+env_logger = "*"
+mio = "*"
+lazy_static = "*"
+
+#[dependencies.deque]
+#path = "/Users/zonyitoo/Projects/deque"
