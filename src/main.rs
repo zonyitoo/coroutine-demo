@@ -7,26 +7,23 @@ extern crate deque;
 extern crate env_logger;
 extern crate mio;
 extern crate libc;
-#[macro_use] extern crate lazy_static;
 
 use std::thread;
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use std::sync::{Mutex, Once, ONCE_INIT};
 use std::mem;
 use std::cell::UnsafeCell;
-use std::os::unix::io::{RawFd, AsRawFd};
-use std::collections::VecDeque;
 use std::io;
-use std::str;
+use std::net::SocketAddr;
 
-use coroutine::{spawn, sched};
+use coroutine::spawn;
 use coroutine::coroutine::{State, Handle, Coroutine};
 
 use deque::{BufferPool, Stealer, Worker, Stolen};
 
-use mio::{EventLoop, Io, Handler, Token, ReadHint, Interest, PollOpt, Evented};
+use mio::{EventLoop, Handler, Token, ReadHint, Interest, PollOpt, Evented};
 use mio::util::Slab;
-use mio::buf::{RingBuf, Buf};
+use mio::buf::Buf;
 
 static mut THREAD_HANDLES: *const Mutex<Vec<(Sender<SchedMessage>, Stealer<Handle>)>> =
     0 as *const Mutex<Vec<(Sender<SchedMessage>, Stealer<Handle>)>>;
@@ -223,32 +220,6 @@ impl Scheduler {
 
 }
 
-fn stdout() -> Io {
-    let fd = unsafe {
-        let fd = libc::dup(libc::STDOUT_FILENO);
-        let mut opts = libc::fcntl(fd, libc::F_GETFL);
-        if opts & libc::O_NONBLOCK == 0 {
-            opts |= libc::O_NONBLOCK;
-            assert!(libc::fcntl(fd, libc::F_SETFL, opts) == 0);
-        }
-        fd
-    };
-    Io::new(fd)
-}
-
-fn stdin() -> Io {
-    let fd = unsafe {
-        let fd = libc::dup(libc::STDOUT_FILENO);
-        let mut opts = libc::fcntl(fd, libc::F_GETFL);
-        if opts & libc::O_NONBLOCK == 0 {
-            opts |= libc::O_NONBLOCK;
-            assert!(libc::fcntl(fd, libc::F_SETFL, opts) == 0);
-        }
-        fd
-    };
-    Io::new(fd)
-}
-
 struct SchedulerHandler {
     slabs: Slab<Handle>,
 }
@@ -297,70 +268,158 @@ impl Handler for SchedulerHandler {
     }
 }
 
+pub struct TcpListener(::mio::tcp::TcpListener);
+
+impl TcpListener {
+    pub fn bind(addr: &SocketAddr) -> io::Result<TcpListener> {
+        let listener = try!(::mio::tcp::TcpListener::bind(addr));
+
+        Ok(TcpListener(listener))
+    }
+
+    pub fn accept(&self) -> io::Result<TcpStream> {
+        let mut scheduler = Scheduler::current();
+
+        let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
+        scheduler.eventloop.register_opt(&self.0, token, Interest::readable(), PollOpt::edge()).unwrap();
+
+        loop {
+            Coroutine::block();
+
+            match self.0.accept() {
+                Ok(None) => {
+                    warn!("accept WOULD_BLOCK: {:?}", token);
+                },
+                Ok(Some(stream)) => {
+                    scheduler.eventloop.deregister(&self.0).unwrap();
+                    return Ok(TcpStream(stream));
+                },
+                Err(err) => {
+                    scheduler.eventloop.deregister(&self.0).unwrap();
+                    return Err(err);
+                }
+            }
+        }
+    }
+}
+
+pub struct TcpStream(mio::tcp::TcpStream);
+
+impl TcpStream {
+    pub fn connect(addr: &SocketAddr) -> io::Result<TcpStream> {
+        let stream = try!(mio::tcp::TcpStream::connect(addr));
+
+        Ok(TcpStream(stream))
+    }
+
+    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
+        self.0.peer_addr()
+    }
+
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.0.local_addr()
+    }
+
+    pub fn try_clone(&self) -> io::Result<TcpStream> {
+        let stream = try!(self.0.try_clone());
+
+        Ok(TcpStream(stream))
+    }
+}
+
+impl io::Read for TcpStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        use mio::TryRead;
+
+        let mut scheduler = Scheduler::current();
+
+        let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
+        scheduler.eventloop.register_opt(&self.0, token, Interest::readable(), PollOpt::edge()).unwrap();
+
+        loop {
+            Coroutine::block();
+
+            match self.0.read_slice(buf) {
+                Ok(None) => {
+                    warn!("TcpStream read WOULDBLOCK");
+                },
+                Ok(Some(len)) => {
+                    return Ok(len);
+                },
+                Err(err) => {
+                    return Err(err);
+                }
+            }
+        }
+    }
+}
+
+impl io::Write for TcpStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        use mio::TryWrite;
+
+        let mut scheduler = Scheduler::current();
+
+        let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
+        scheduler.eventloop.register_opt(&self.0, token, Interest::writable(), PollOpt::edge()).unwrap();
+
+        loop {
+            Coroutine::block();
+
+            match self.0.write_slice(buf) {
+                Ok(None) => {
+                    warn!("TcpStream write WOULDBLOCK");
+                },
+                Ok(Some(len)) => {
+                    return Ok(len);
+                },
+                Err(err) => {
+                    return Err(err);
+                }
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 fn main() {
     env_logger::init().unwrap();
 
     Scheduler::spawn(|| {
-        let mut stdout_io = stdout();
-        let mut stdin_io = stdin();
+        let server = TcpListener::bind(&"127.0.0.1:8000".parse().unwrap()).unwrap();
 
         loop {
-            // let buf = format!("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA in {}\n", thread::current().name().unwrap());
-            // Scheduler::current().write_to(&mut stdout_io, buf.as_bytes()).unwrap();
+            use std::io::{Read, Write};
 
-            let mut buf = [0; 10240];
-            let len = Scheduler::current().read_from(&mut stdin_io, &mut buf).unwrap().unwrap();
-            let output = format!("A read {} in {}\n",
-                                 str::from_utf8(&buf[0..len]).unwrap(),
-                                 thread::current().name().unwrap());
-            Scheduler::current().write_to(&mut stdout_io, output.as_bytes()).unwrap();
+            let mut stream = server.accept().unwrap();
+            info!("Accept connection: {:?}", stream.peer_addr().unwrap());
+
+            Scheduler::spawn(move|| {
+                let mut buf = [0; 10240];
+
+                loop {
+                    match stream.read(&mut buf) {
+                        Ok(0) => {
+                            debug!("EOF received, going to close");
+                            break;
+                        },
+                        Ok(len) => {
+                            debug!("Received {} bytes, echo back!", len);
+                            stream.write_all(&buf[0..len]).unwrap();
+                        },
+                        Err(err) => {
+                            panic!("Error occurs: {:?}", err);
+                        }
+                    }
+                }
+
+                info!("{:?} closed", stream.peer_addr().unwrap());
+            });
         }
     });
-
-    Scheduler::spawn(|| {
-        let mut stdout_io = stdout();
-        let mut stdin_io = stdin();
-
-        loop {
-            // let buf = format!("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB in {}\n", thread::current().name().unwrap());
-            // Scheduler::current().write_to(&mut stdout_io, buf.as_bytes()).unwrap();
-
-            let mut buf = [0; 10240];
-            let len = Scheduler::current().read_from(&mut stdin_io, &mut buf).unwrap().unwrap();
-            let output = format!("B read {} in {}\n",
-                                 str::from_utf8(&buf[0..len]).unwrap(),
-                                 thread::current().name().unwrap());
-            Scheduler::current().write_to(&mut stdout_io, output.as_bytes()).unwrap();
-        }
-    });
-
-    // Scheduler::spawn(|| {
-    //     let mut stdout_io = stdout();
-
-    //     loop {
-    //         let buf = format!("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC in {}\n", thread::current().name().unwrap());
-    //         Scheduler::current().write_to(&mut stdout_io, buf.as_bytes()).unwrap();
-    //     }
-    // });
-
-    // Scheduler::spawn(|| {
-    //     let mut stdout_io = stdout();
-
-    //     loop {
-    //         let buf = format!("DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD in {}\n", thread::current().name().unwrap());
-    //         Scheduler::current().write_to(&mut stdout_io, buf.as_bytes()).unwrap();
-    //     }
-    // });
-
-    // Scheduler::spawn(|| {
-    //     let mut stdout_io = stdout();
-
-    //     loop {
-    //         let buf = format!("EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE in {}\n", thread::current().name().unwrap());
-    //         Scheduler::current().write_to(&mut stdout_io, buf.as_bytes()).unwrap();
-    //     }
-    // });
 
     let mut threads = Vec::new();
     for tid in 0..num_cpus::get() {

@@ -12,8 +12,11 @@ num_cpus = "*"
 deque = "*"
 log = "*"
 env_logger = "*"
-mio = "*"
+#mio = "*"
 lazy_static = "*"
 
 #[dependencies.deque]
 #path = "/Users/zonyitoo/Projects/deque"
+
+[dependencies.mio]
+git = "https://github.com/carllerche/mio.git"
