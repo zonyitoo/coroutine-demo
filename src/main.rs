@@ -22,7 +22,7 @@ use coroutine::coroutine::{State, Handle, Coroutine};
 
 use deque::{BufferPool, Stealer, Worker, Stolen};
 
-use mio::{EventLoop, Io, Handler, Token, ReadHint, Interest, PollOpt, Evented, Socket};
+use mio::{EventLoop, Handler, Token, ReadHint, Interest, PollOpt, Socket};
 use mio::util::Slab;
 use mio::buf::Buf;
 
@@ -51,7 +51,7 @@ pub enum SchedMessage {
 
 pub struct Scheduler {
     workqueue: Worker<Handle>,
-    workstealer: Stealer<Handle>,
+    // workstealer: Stealer<Handle>,
 
     commchannel: Receiver<SchedMessage>,
 
@@ -80,7 +80,7 @@ impl Scheduler {
 
         Scheduler {
             workqueue: worker,
-            workstealer: stealer,
+            // workstealer: stealer,
 
             commchannel: rx,
 
@@ -119,36 +119,41 @@ impl Scheduler {
 
             self.eventloop.run_once(&mut self.handler).unwrap();
 
-            match self.workstealer.steal() {
-                Stolen::Data(work) => {
-                    match work.state() {
-                        State::Suspended | State::Blocked => {},
-                        _ => {
-                            error!("Trying to resume coroutine {:?}, but its state is {:?}",
-                                   work, work.state());
-                            continue;
+            debug!("Trying to resume all ready coroutines");
+            // Run all ready coroutines
+            let mut need_steal = true;
+            while let Some(work) = self.workqueue.pop() {
+                match work.state() {
+                    State::Suspended | State::Blocked => {
+                        debug!("Resuming Coroutine: {:?}", work);
+                        need_steal = false;
+
+                        if let Err(msg) = work.resume() {
+                            error!("Coroutine panicked! {:?}", msg);
                         }
-                    }
 
-                    if let Err(msg) = work.resume() {
-                        error!("Coroutine panicked! {:?}", msg);
+                        match work.state() {
+                            State::Suspended => {
+                                debug!("Coroutine suspended, going to be resumed next round");
+                                self.workqueue.push(work);
+                            },
+                            _ => {
+                                debug!("Coroutine state: {:?}, will not be resumed automatically", work.state());
+                            }
+                        }
+                    },
+                    _ => {
+                        error!("Trying to resume coroutine {:?}, but its state is {:?}",
+                               work, work.state());
                     }
-
-                    match work.state() {
-                        State::Suspended => self.workqueue.push(work),
-                        _ => {}
-                    }
-
-                    continue;
-                },
-                Stolen::Empty => {
-                    debug!("Nothing to do, try to steal from neighbors");
-                },
-                Stolen::Abort => {
-                    error!("Abort!?");
                 }
             }
 
+            if !need_steal {
+                continue;
+            }
+
+            debug!("Trying to steal from neighbors");
             for &(_, ref st) in self.neighbors.iter() {
                 match st.steal() {
                     Stolen::Empty => {},
@@ -190,19 +195,13 @@ impl Handler for SchedulerHandler {
     type Timeout = ();
     type Message = ();
 
-    fn writable(&mut self, eventloop: &mut EventLoop<Self>, token: Token) {
+    fn writable(&mut self, _: &mut EventLoop<Self>, token: Token) {
 
         debug!("In writable, token {:?}", token);
 
-        // FIXME: WHY??!
-        // if token == Token(0) {
-        //     error!("In writable got Token(0)!!");
-        //     return;
-        // }
-
         match self.slabs.remove(token) {
             Some(hdl) => {
-                Scheduler::current().resume(hdl.clone());
+                Scheduler::current().resume(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on writable {:?}", token);
@@ -211,19 +210,13 @@ impl Handler for SchedulerHandler {
 
     }
 
-    fn readable(&mut self, eventloop: &mut EventLoop<Self>, token: Token, _: ReadHint) {
+    fn readable(&mut self, _: &mut EventLoop<Self>, token: Token, _: ReadHint) {
 
         debug!("In readable, token {:?}", token);
 
-        // FIXME: WHY??!
-        // if token == Token(0) {
-        //     error!("In readable got Token(0)!!");
-        //     return;
-        // }
-
         match self.slabs.remove(token) {
             Some(hdl) => {
-                Scheduler::current().resume(hdl.clone());
+                Scheduler::current().resume(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on readable {:?}", token);
@@ -252,20 +245,14 @@ impl TcpListener {
 
         Coroutine::block();
 
-        debug!("Accept wake up");
-
         match self.0.accept() {
             Ok(None) => {
                 panic!("accept WOULDBLOCK: {:?}", token);
             },
             Ok(Some(stream)) => {
-                // scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
-                // scheduler.eventloop.deregister(&self.0).unwrap();
                 Ok(TcpStream(stream))
             },
             Err(err) => {
-                // scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
-                // scheduler.eventloop.deregister(&self.0).unwrap();
                 Err(err)
             }
         }
