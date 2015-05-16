@@ -122,6 +122,15 @@ impl Scheduler {
 
             match self.workstealer.steal() {
                 Stolen::Data(work) => {
+                    match work.state() {
+                        State::Suspended | State::Blocked => {},
+                        _ => {
+                            error!("Trying to resume coroutine {:?}, but its state is {:?}",
+                                   work, work.state());
+                            continue;
+                        }
+                    }
+
                     if let Err(msg) = work.resume() {
                         error!("Coroutine panicked! {:?}", msg);
                     }
@@ -145,10 +154,6 @@ impl Scheduler {
                 match st.steal() {
                     Stolen::Empty => {},
                     Stolen::Data(coro) => {
-                        if let Err(msg) = coro.resume() {
-                            error!("Coroutine panicked! {:?}", msg);
-                        }
-
                         match coro.state() {
                             State::Suspended => self.workqueue.push(coro),
                             _ => {}
@@ -157,58 +162,6 @@ impl Scheduler {
                         break;
                     },
                     Stolen::Abort => {}
-                }
-            }
-        }
-    }
-
-    pub fn write_to<E: Evented + mio::TryWrite>(&mut self, fd: &mut E, buf: &[u8]) -> io::Result<Option<usize>> {
-
-        use mio::TryWrite;
-
-        let token = self.handler.slabs.insert(Coroutine::current()).unwrap();
-
-        self.eventloop.register_opt(fd, token, Interest::writable(), PollOpt::edge()).unwrap();
-
-        loop {
-            Coroutine::block();
-
-            match fd.write_slice(buf) {
-                Ok(None) => {
-                    warn!("write_to WOULD_BLOCK");
-                },
-                Ok(Some(len)) => {
-                    self.eventloop.deregister(fd).unwrap();
-                    return Ok(Some(len));
-                },
-                Err(err) => {
-                    self.eventloop.deregister(fd).unwrap();
-                    return Err(err);
-                }
-            }
-        }
-    }
-
-    pub fn read_from<E: Evented + mio::TryRead>(&mut self, fd: &mut E, buf: &mut [u8]) -> io::Result<Option<usize>> {
-        use mio::TryRead;
-
-        let token = self.handler.slabs.insert(Coroutine::current()).unwrap();
-        self.eventloop.register_opt(fd, token, Interest::readable(), PollOpt::edge()).unwrap();
-
-        loop {
-            Coroutine::block();
-
-            match fd.read_slice(buf) {
-                Ok(None) => {
-                    warn!("read_from WOULD_BLOCK");
-                },
-                Ok(Some(len)) => {
-                    self.eventloop.deregister(fd).unwrap();
-                    return Ok(Some(len));
-                },
-                Err(err) => {
-                    self.eventloop.deregister(fd).unwrap();
-                    return Err(err);
                 }
             }
         }
@@ -228,7 +181,7 @@ const MAX_TOKEN_NUM: usize = 102400;
 impl SchedulerHandler {
     fn new() -> SchedulerHandler {
         SchedulerHandler {
-            slabs: Slab::new(MAX_TOKEN_NUM),
+            slabs: Slab::new_starting_at(Token(1), MAX_TOKEN_NUM),
         }
     }
 }
@@ -241,9 +194,13 @@ impl Handler for SchedulerHandler {
 
         debug!("In writable, token {:?}", token);
 
-        match self.slabs.remove(token) {
+        // if token == Token(0) {
+        //     panic!("Token(0) has writable????");
+        // }
+
+        match self.slabs.get(token) {
             Some(hdl) => {
-                Scheduler::current().resume(hdl);
+                Scheduler::current().resume(hdl.clone());
             },
             None => {
                 warn!("No coroutine is waiting on writable {:?}", token);
@@ -256,9 +213,9 @@ impl Handler for SchedulerHandler {
 
         debug!("In readable, token {:?}", token);
 
-        match self.slabs.remove(token) {
+        match self.slabs.get(token) {
             Some(hdl) => {
-                Scheduler::current().resume(hdl);
+                Scheduler::current().resume(hdl.clone());
             },
             None => {
                 warn!("No coroutine is waiting on readable {:?}", token);
@@ -281,20 +238,24 @@ impl TcpListener {
         let mut scheduler = Scheduler::current();
 
         let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
-        scheduler.eventloop.register_opt(&self.0, token, Interest::readable(), PollOpt::edge()).unwrap();
+        info!("Accepter token {:?}", token);
+        scheduler.eventloop.register_opt(&self.0, token, Interest::readable(),
+                                         PollOpt::edge()).unwrap();
 
         loop {
             Coroutine::block();
 
             match self.0.accept() {
                 Ok(None) => {
-                    warn!("accept WOULD_BLOCK: {:?}", token);
+                    error!("accept WOULDBLOCK: {:?}", token);
                 },
                 Ok(Some(stream)) => {
+                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
                     scheduler.eventloop.deregister(&self.0).unwrap();
                     return Ok(TcpStream(stream));
                 },
                 Err(err) => {
+                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
                     scheduler.eventloop.deregister(&self.0).unwrap();
                     return Err(err);
                 }
@@ -334,7 +295,8 @@ impl io::Read for TcpStream {
         let mut scheduler = Scheduler::current();
 
         let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
-        scheduler.eventloop.register_opt(&self.0, token, Interest::readable(), PollOpt::edge()).unwrap();
+        scheduler.eventloop.register_opt(&self.0, token, Interest::readable(),
+                                         PollOpt::edge()).unwrap();
 
         loop {
             Coroutine::block();
@@ -344,9 +306,13 @@ impl io::Read for TcpStream {
                     warn!("TcpStream read WOULDBLOCK");
                 },
                 Ok(Some(len)) => {
+                    scheduler.eventloop.deregister(&self.0).unwrap();
+                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
                     return Ok(len);
                 },
                 Err(err) => {
+                    scheduler.eventloop.deregister(&self.0).unwrap();
+                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
                     return Err(err);
                 }
             }
@@ -361,7 +327,8 @@ impl io::Write for TcpStream {
         let mut scheduler = Scheduler::current();
 
         let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
-        scheduler.eventloop.register_opt(&self.0, token, Interest::writable(), PollOpt::edge()).unwrap();
+        scheduler.eventloop.register_opt(&self.0, token, Interest::writable(),
+                                         PollOpt::edge()).unwrap();
 
         loop {
             Coroutine::block();
@@ -371,9 +338,13 @@ impl io::Write for TcpStream {
                     warn!("TcpStream write WOULDBLOCK");
                 },
                 Ok(Some(len)) => {
+                    scheduler.eventloop.deregister(&self.0).unwrap();
+                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
                     return Ok(len);
                 },
                 Err(err) => {
+                    scheduler.eventloop.deregister(&self.0).unwrap();
+                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
                     return Err(err);
                 }
             }
@@ -389,7 +360,7 @@ fn main() {
     env_logger::init().unwrap();
 
     Scheduler::spawn(|| {
-        let server = TcpListener::bind(&"127.0.0.1:8000".parse().unwrap()).unwrap();
+        let server = TcpListener::bind(&"127.0.0.1:7".parse().unwrap()).unwrap();
 
         loop {
             use std::io::{Read, Write};
@@ -421,17 +392,17 @@ fn main() {
         }
     });
 
-    let mut threads = Vec::new();
-    for tid in 0..num_cpus::get() {
-        let fut = thread::Builder::new().name(format!("Thread {}", tid)).scoped(|| {
-            Scheduler::current().schedule();
-        }).unwrap();
-        threads.push(fut);
-    }
+    // let mut threads = Vec::new();
+    // for tid in 0..num_cpus::get() {
+    //     let fut = thread::Builder::new().name(format!("Thread {}", tid)).scoped(|| {
+    //         Scheduler::current().schedule();
+    //     }).unwrap();
+    //     threads.push(fut);
+    // }
 
-    for fut in threads.into_iter() {
-        fut.join();
-    }
+    // for fut in threads.into_iter() {
+    //     fut.join();
+    // }
 
-    // Scheduler::current().schedule();
+    Scheduler::current().schedule();
 }

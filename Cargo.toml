@@ -1,5 +1,5 @@
 [package]
-name = "Coro"
+name = "coro-demo"
 version = "0.1.0"
 authors = ["Y. T. Chung <zonyitoo@gmail.com>"]
 
