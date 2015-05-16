@@ -15,13 +15,14 @@ use std::mem;
 use std::cell::UnsafeCell;
 use std::io;
 use std::net::SocketAddr;
+use std::os::unix::io::{RawFd, AsRawFd};
 
 use coroutine::spawn;
 use coroutine::coroutine::{State, Handle, Coroutine};
 
 use deque::{BufferPool, Stealer, Worker, Stolen};
 
-use mio::{EventLoop, Handler, Token, ReadHint, Interest, PollOpt, Evented};
+use mio::{EventLoop, Io, Handler, Token, ReadHint, Interest, PollOpt, Evented};
 use mio::util::Slab;
 use mio::buf::Buf;
 
@@ -175,7 +176,7 @@ impl Scheduler {
 }
 
 struct SchedulerHandler {
-    slabs: Slab<Handle>,
+    slabs: Slab<(Handle, RawFd)>,
 }
 
 const MAX_TOKEN_NUM: usize = 102400;
@@ -191,18 +192,23 @@ impl Handler for SchedulerHandler {
     type Timeout = ();
     type Message = ();
 
-    fn writable(&mut self, _: &mut EventLoop<Self>, token: Token) {
+    fn writable(&mut self, eventloop: &mut EventLoop<Self>, token: Token) {
 
         debug!("In writable, token {:?}", token);
 
+        // FIXME: WHY??!
         if token == Token(0) {
             error!("In writable got Token(0)!!");
             return;
         }
 
-        match self.slabs.get(token) {
-            Some(hdl) => {
+        match self.slabs.remove(token) {
+            Some((hdl, fd)) => {
                 Scheduler::current().resume(hdl.clone());
+
+                let fdio = Io::new(fd);
+                eventloop.deregister(&fdio).unwrap();
+                mem::forget(fdio);
             },
             None => {
                 warn!("No coroutine is waiting on writable {:?}", token);
@@ -211,18 +217,23 @@ impl Handler for SchedulerHandler {
 
     }
 
-    fn readable(&mut self, _: &mut EventLoop<Self>, token: Token, _: ReadHint) {
+    fn readable(&mut self, eventloop: &mut EventLoop<Self>, token: Token, _: ReadHint) {
 
         debug!("In readable, token {:?}", token);
 
+        // FIXME: WHY??!
         if token == Token(0) {
             error!("In readable got Token(0)!!");
             return;
         }
 
-        match self.slabs.get(token) {
-            Some(hdl) => {
+        match self.slabs.remove(token) {
+            Some((hdl, fd)) => {
                 Scheduler::current().resume(hdl.clone());
+
+                let fdio = Io::new(fd);
+                eventloop.deregister(&fdio).unwrap();
+                mem::forget(fdio);
             },
             None => {
                 warn!("No coroutine is waiting on readable {:?}", token);
@@ -244,30 +255,28 @@ impl TcpListener {
     pub fn accept(&self) -> io::Result<TcpStream> {
         let mut scheduler = Scheduler::current();
 
-        let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
+        let token = scheduler.handler.slabs.insert((Coroutine::current(), self.0.as_raw_fd())).unwrap();
         info!("Accepter token {:?}", token);
         scheduler.eventloop.register_opt(&self.0, token, Interest::readable(),
                                          PollOpt::edge()|PollOpt::oneshot()).unwrap();
 
-        loop {
-            Coroutine::block();
+        Coroutine::block();
 
-            info!("Accept wake up");
+        info!("Accept wake up");
 
-            match self.0.accept() {
-                Ok(None) => {
-                    error!("accept WOULDBLOCK: {:?}", token);
-                },
-                Ok(Some(stream)) => {
-                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
-                    scheduler.eventloop.deregister(&self.0).unwrap();
-                    return Ok(TcpStream(stream));
-                },
-                Err(err) => {
-                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
-                    scheduler.eventloop.deregister(&self.0).unwrap();
-                    return Err(err);
-                }
+        match self.0.accept() {
+            Ok(None) => {
+                panic!("accept WOULDBLOCK: {:?}", token);
+            },
+            Ok(Some(stream)) => {
+                // scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
+                // scheduler.eventloop.deregister(&self.0).unwrap();
+                Ok(TcpStream(stream))
+            },
+            Err(err) => {
+                // scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
+                // scheduler.eventloop.deregister(&self.0).unwrap();
+                Err(err)
             }
         }
     }
@@ -303,27 +312,25 @@ impl io::Read for TcpStream {
 
         let mut scheduler = Scheduler::current();
 
-        let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
+        let token = scheduler.handler.slabs.insert((Coroutine::current(), self.0.as_raw_fd())).unwrap();
         scheduler.eventloop.register_opt(&self.0, token, Interest::readable(),
                                          PollOpt::edge()).unwrap();
 
-        loop {
-            Coroutine::block();
+        Coroutine::block();
 
-            match self.0.read_slice(buf) {
-                Ok(None) => {
-                    warn!("TcpStream read WOULDBLOCK");
-                },
-                Ok(Some(len)) => {
-                    scheduler.eventloop.deregister(&self.0).unwrap();
-                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
-                    return Ok(len);
-                },
-                Err(err) => {
-                    scheduler.eventloop.deregister(&self.0).unwrap();
-                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
-                    return Err(err);
-                }
+        match self.0.read_slice(buf) {
+            Ok(None) => {
+                panic!("TcpStream read WOULDBLOCK");
+            },
+            Ok(Some(len)) => {
+                // scheduler.eventloop.deregister(&self.0).unwrap();
+                // scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
+                Ok(len)
+            },
+            Err(err) => {
+                // scheduler.eventloop.deregister(&self.0).unwrap();
+                // scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
+                Err(err)
             }
         }
     }
@@ -335,27 +342,25 @@ impl io::Write for TcpStream {
 
         let mut scheduler = Scheduler::current();
 
-        let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
+        let token = scheduler.handler.slabs.insert((Coroutine::current(), self.0.as_raw_fd())).unwrap();
         scheduler.eventloop.register_opt(&self.0, token, Interest::writable(),
                                          PollOpt::edge()).unwrap();
 
-        loop {
-            Coroutine::block();
+        Coroutine::block();
 
-            match self.0.write_slice(buf) {
-                Ok(None) => {
-                    warn!("TcpStream write WOULDBLOCK");
-                },
-                Ok(Some(len)) => {
-                    scheduler.eventloop.deregister(&self.0).unwrap();
-                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
-                    return Ok(len);
-                },
-                Err(err) => {
-                    scheduler.eventloop.deregister(&self.0).unwrap();
-                    scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
-                    return Err(err);
-                }
+        match self.0.write_slice(buf) {
+            Ok(None) => {
+                panic!("TcpStream write WOULDBLOCK");
+            },
+            Ok(Some(len)) => {
+                // scheduler.eventloop.deregister(&self.0).unwrap();
+                // scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
+                Ok(len)
+            },
+            Err(err) => {
+                // scheduler.eventloop.deregister(&self.0).unwrap();
+                // scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
+                Err(err)
             }
         }
     }
