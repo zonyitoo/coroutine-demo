@@ -108,8 +108,6 @@ impl Scheduler {
     }
 
     fn schedule(&mut self) {
-        // let mut eventloop = EventLoop::new().unwrap();
-
         loop {
             match self.commchannel.try_recv() {
                 Ok(SchedMessage::NewNeighbor(tx, st)) => {
@@ -121,34 +119,33 @@ impl Scheduler {
 
             self.eventloop.run_once(&mut self.handler).unwrap();
 
-            loop {
-                match self.workstealer.steal() {
-                    Stolen::Data(work) => {
-                        match work.state() {
-                            State::Suspended | State::Blocked => {},
-                            _ => {
-                                error!("Trying to resume coroutine {:?}, but its state is {:?}",
-                                       work, work.state());
-                            }
+            match self.workstealer.steal() {
+                Stolen::Data(work) => {
+                    match work.state() {
+                        State::Suspended | State::Blocked => {},
+                        _ => {
+                            error!("Trying to resume coroutine {:?}, but its state is {:?}",
+                                   work, work.state());
+                            continue;
                         }
-
-                        if let Err(msg) = work.resume() {
-                            error!("Coroutine panicked! {:?}", msg);
-                        }
-
-                        match work.state() {
-                            State::Suspended => self.workqueue.push(work),
-                            _ => {}
-                        }
-                    },
-                    Stolen::Empty => {
-                        debug!("Nothing to do, try to steal from neighbors");
-                        break;
-                    },
-                    Stolen::Abort => {
-                        error!("Abort!?");
-                        break;
                     }
+
+                    if let Err(msg) = work.resume() {
+                        error!("Coroutine panicked! {:?}", msg);
+                    }
+
+                    match work.state() {
+                        State::Suspended => self.workqueue.push(work),
+                        _ => {}
+                    }
+
+                    continue;
+                },
+                Stolen::Empty => {
+                    debug!("Nothing to do, try to steal from neighbors");
+                },
+                Stolen::Abort => {
+                    error!("Abort!?");
                 }
             }
 
@@ -310,12 +307,15 @@ impl io::Read for TcpStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         use mio::TryRead;
 
+        debug!("Read: Going to register event");
+
         let mut scheduler = Scheduler::current();
 
         let token = scheduler.handler.slabs.insert((Coroutine::current(), self.0.as_raw_fd())).unwrap();
         scheduler.eventloop.register_opt(&self.0, token, Interest::readable(),
-                                         PollOpt::edge()).unwrap();
+                                         PollOpt::edge()|PollOpt::oneshot()).unwrap();
 
+        debug!("Read: Blocked current Coroutine ...");
         Coroutine::block();
 
         match self.0.read_slice(buf) {
@@ -325,6 +325,7 @@ impl io::Read for TcpStream {
             Ok(Some(len)) => {
                 // scheduler.eventloop.deregister(&self.0).unwrap();
                 // scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
+                debug!("Read {} bytes, {:?}", len, token);
                 Ok(len)
             },
             Err(err) => {
@@ -340,12 +341,15 @@ impl io::Write for TcpStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         use mio::TryWrite;
 
+        debug!("Write: Going to register event");
+
         let mut scheduler = Scheduler::current();
 
         let token = scheduler.handler.slabs.insert((Coroutine::current(), self.0.as_raw_fd())).unwrap();
         scheduler.eventloop.register_opt(&self.0, token, Interest::writable(),
-                                         PollOpt::edge()).unwrap();
+                                         PollOpt::edge()|PollOpt::oneshot()).unwrap();
 
+        debug!("Write: Blocked current Coroutine ...");
         Coroutine::block();
 
         match self.0.write_slice(buf) {
@@ -355,6 +359,7 @@ impl io::Write for TcpStream {
             Ok(Some(len)) => {
                 // scheduler.eventloop.deregister(&self.0).unwrap();
                 // scheduler.handler.slabs.remove(token).expect("Unable to remove token from slab");
+                debug!("Written {} bytes, {:?}", len, token);
                 Ok(len)
             },
             Err(err) => {
@@ -386,13 +391,14 @@ fn main() {
                 let mut buf = [0; 10240];
 
                 loop {
+                    info!("Trying to Read...");
                     match stream.read(&mut buf) {
                         Ok(0) => {
                             debug!("EOF received, going to close");
                             break;
                         },
                         Ok(len) => {
-                            debug!("Received {} bytes, echo back!", len);
+                            debug!("Read {} bytes, echo back!", len);
                             stream.write_all(&buf[0..len]).unwrap();
                         },
                         Err(err) => {
@@ -406,17 +412,17 @@ fn main() {
         }
     });
 
-    // let mut threads = Vec::new();
-    // for tid in 0..num_cpus::get() {
-    //     let fut = thread::Builder::new().name(format!("Thread {}", tid)).scoped(|| {
-    //         Scheduler::current().schedule();
-    //     }).unwrap();
-    //     threads.push(fut);
-    // }
+    let mut threads = Vec::new();
+    for tid in 0..num_cpus::get() {
+        let fut = thread::Builder::new().name(format!("Thread {}", tid)).scoped(|| {
+            Scheduler::current().schedule();
+        }).unwrap();
+        threads.push(fut);
+    }
 
-    // for fut in threads.into_iter() {
-    //     fut.join();
-    // }
+    for fut in threads.into_iter() {
+        fut.join();
+    }
 
-    Scheduler::current().schedule();
+    // Scheduler::current().schedule();
 }
