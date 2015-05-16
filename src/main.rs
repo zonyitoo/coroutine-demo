@@ -120,33 +120,34 @@ impl Scheduler {
 
             self.eventloop.run_once(&mut self.handler).unwrap();
 
-            match self.workstealer.steal() {
-                Stolen::Data(work) => {
-                    match work.state() {
-                        State::Suspended | State::Blocked => {},
-                        _ => {
-                            error!("Trying to resume coroutine {:?}, but its state is {:?}",
-                                   work, work.state());
-                            continue;
+            loop {
+                match self.workstealer.steal() {
+                    Stolen::Data(work) => {
+                        match work.state() {
+                            State::Suspended | State::Blocked => {},
+                            _ => {
+                                error!("Trying to resume coroutine {:?}, but its state is {:?}",
+                                       work, work.state());
+                            }
                         }
-                    }
 
-                    if let Err(msg) = work.resume() {
-                        error!("Coroutine panicked! {:?}", msg);
-                    }
+                        if let Err(msg) = work.resume() {
+                            error!("Coroutine panicked! {:?}", msg);
+                        }
 
-                    match work.state() {
-                        State::Suspended => self.workqueue.push(work),
-                        _ => {}
+                        match work.state() {
+                            State::Suspended => self.workqueue.push(work),
+                            _ => {}
+                        }
+                    },
+                    Stolen::Empty => {
+                        debug!("Nothing to do, try to steal from neighbors");
+                        break;
+                    },
+                    Stolen::Abort => {
+                        error!("Abort!?");
+                        break;
                     }
-
-                    continue;
-                },
-                Stolen::Empty => {
-                    debug!("Nothing to do, try to steal from neighbors");
-                },
-                Stolen::Abort => {
-                    error!("Abort!?");
                 }
             }
 
@@ -194,9 +195,10 @@ impl Handler for SchedulerHandler {
 
         debug!("In writable, token {:?}", token);
 
-        // if token == Token(0) {
-        //     panic!("Token(0) has writable????");
-        // }
+        if token == Token(0) {
+            error!("In writable got Token(0)!!");
+            return;
+        }
 
         match self.slabs.get(token) {
             Some(hdl) => {
@@ -212,6 +214,11 @@ impl Handler for SchedulerHandler {
     fn readable(&mut self, _: &mut EventLoop<Self>, token: Token, _: ReadHint) {
 
         debug!("In readable, token {:?}", token);
+
+        if token == Token(0) {
+            error!("In readable got Token(0)!!");
+            return;
+        }
 
         match self.slabs.get(token) {
             Some(hdl) => {
@@ -240,10 +247,12 @@ impl TcpListener {
         let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
         info!("Accepter token {:?}", token);
         scheduler.eventloop.register_opt(&self.0, token, Interest::readable(),
-                                         PollOpt::edge()).unwrap();
+                                         PollOpt::edge()|PollOpt::oneshot()).unwrap();
 
         loop {
             Coroutine::block();
+
+            info!("Accept wake up");
 
             match self.0.accept() {
                 Ok(None) => {
