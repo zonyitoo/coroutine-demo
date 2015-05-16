@@ -20,3 +20,4 @@ lazy_static = "*"
 
 [dependencies.mio]
 git = "https://github.com/carllerche/mio.git"
+#path = "/Users/zonyitoo/Projects/mio"

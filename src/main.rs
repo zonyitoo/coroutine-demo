@@ -15,14 +15,14 @@ use std::mem;
 use std::cell::UnsafeCell;
 use std::io;
 use std::net::SocketAddr;
-use std::os::unix::io::{RawFd, AsRawFd};
+use std::ops::{Deref, DerefMut};
 
 use coroutine::spawn;
 use coroutine::coroutine::{State, Handle, Coroutine};
 
 use deque::{BufferPool, Stealer, Worker, Stolen};
 
-use mio::{EventLoop, Io, Handler, Token, ReadHint, Interest, PollOpt, Evented};
+use mio::{EventLoop, Io, Handler, Token, ReadHint, Interest, PollOpt, Evented, Socket};
 use mio::util::Slab;
 use mio::buf::Buf;
 
@@ -173,14 +173,15 @@ impl Scheduler {
 }
 
 struct SchedulerHandler {
-    slabs: Slab<(Handle, RawFd)>,
+    slabs: Slab<Handle>,
 }
 
 const MAX_TOKEN_NUM: usize = 102400;
 impl SchedulerHandler {
     fn new() -> SchedulerHandler {
         SchedulerHandler {
-            slabs: Slab::new_starting_at(Token(1), MAX_TOKEN_NUM),
+            // slabs: Slab::new_starting_at(Token(1), MAX_TOKEN_NUM),
+            slabs: Slab::new(MAX_TOKEN_NUM),
         }
     }
 }
@@ -194,18 +195,14 @@ impl Handler for SchedulerHandler {
         debug!("In writable, token {:?}", token);
 
         // FIXME: WHY??!
-        if token == Token(0) {
-            error!("In writable got Token(0)!!");
-            return;
-        }
+        // if token == Token(0) {
+        //     error!("In writable got Token(0)!!");
+        //     return;
+        // }
 
         match self.slabs.remove(token) {
-            Some((hdl, fd)) => {
+            Some(hdl) => {
                 Scheduler::current().resume(hdl.clone());
-
-                let fdio = Io::new(fd);
-                eventloop.deregister(&fdio).unwrap();
-                mem::forget(fdio);
             },
             None => {
                 warn!("No coroutine is waiting on writable {:?}", token);
@@ -219,18 +216,14 @@ impl Handler for SchedulerHandler {
         debug!("In readable, token {:?}", token);
 
         // FIXME: WHY??!
-        if token == Token(0) {
-            error!("In readable got Token(0)!!");
-            return;
-        }
+        // if token == Token(0) {
+        //     error!("In readable got Token(0)!!");
+        //     return;
+        // }
 
         match self.slabs.remove(token) {
-            Some((hdl, fd)) => {
+            Some(hdl) => {
                 Scheduler::current().resume(hdl.clone());
-
-                let fdio = Io::new(fd);
-                eventloop.deregister(&fdio).unwrap();
-                mem::forget(fdio);
             },
             None => {
                 warn!("No coroutine is waiting on readable {:?}", token);
@@ -252,14 +245,14 @@ impl TcpListener {
     pub fn accept(&self) -> io::Result<TcpStream> {
         let mut scheduler = Scheduler::current();
 
-        let token = scheduler.handler.slabs.insert((Coroutine::current(), self.0.as_raw_fd())).unwrap();
-        info!("Accepter token {:?}", token);
+        let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
+        debug!("Accepter token {:?}", token);
         scheduler.eventloop.register_opt(&self.0, token, Interest::readable(),
                                          PollOpt::edge()|PollOpt::oneshot()).unwrap();
 
         Coroutine::block();
 
-        info!("Accept wake up");
+        debug!("Accept wake up");
 
         match self.0.accept() {
             Ok(None) => {
@@ -276,6 +269,20 @@ impl TcpListener {
                 Err(err)
             }
         }
+    }
+}
+
+impl Deref for TcpListener {
+    type Target = ::mio::tcp::TcpListener;
+
+    fn deref(&self) -> &::mio::tcp::TcpListener {
+        &self.0
+    }
+}
+
+impl DerefMut for TcpListener {
+    fn deref_mut(&mut self) -> &mut ::mio::tcp::TcpListener {
+        &mut self.0
     }
 }
 
@@ -311,7 +318,7 @@ impl io::Read for TcpStream {
 
         let mut scheduler = Scheduler::current();
 
-        let token = scheduler.handler.slabs.insert((Coroutine::current(), self.0.as_raw_fd())).unwrap();
+        let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
         scheduler.eventloop.register_opt(&self.0, token, Interest::readable(),
                                          PollOpt::edge()|PollOpt::oneshot()).unwrap();
 
@@ -345,7 +352,7 @@ impl io::Write for TcpStream {
 
         let mut scheduler = Scheduler::current();
 
-        let token = scheduler.handler.slabs.insert((Coroutine::current(), self.0.as_raw_fd())).unwrap();
+        let token = scheduler.handler.slabs.insert(Coroutine::current()).unwrap();
         scheduler.eventloop.register_opt(&self.0, token, Interest::writable(),
                                          PollOpt::edge()|PollOpt::oneshot()).unwrap();
 
@@ -380,6 +387,10 @@ fn main() {
 
     Scheduler::spawn(|| {
         let server = TcpListener::bind(&"127.0.0.1:7".parse().unwrap()).unwrap();
+        server.set_reuseaddr(false).unwrap();
+        server.set_reuseport(false).unwrap();
+
+        info!("Listening on {:?}", server.local_addr().unwrap());
 
         loop {
             use std::io::{Read, Write};
@@ -391,14 +402,14 @@ fn main() {
                 let mut buf = [0; 10240];
 
                 loop {
-                    info!("Trying to Read...");
+                    debug!("Trying to Read...");
                     match stream.read(&mut buf) {
                         Ok(0) => {
                             debug!("EOF received, going to close");
                             break;
                         },
                         Ok(len) => {
-                            debug!("Read {} bytes, echo back!", len);
+                            info!("Read {} bytes, echo back!", len);
                             stream.write_all(&buf[0..len]).unwrap();
                         },
                         Err(err) => {
@@ -412,17 +423,17 @@ fn main() {
         }
     });
 
-    let mut threads = Vec::new();
-    for tid in 0..num_cpus::get() {
-        let fut = thread::Builder::new().name(format!("Thread {}", tid)).scoped(|| {
-            Scheduler::current().schedule();
-        }).unwrap();
-        threads.push(fut);
-    }
+    // let mut threads = Vec::new();
+    // for tid in 0..num_cpus::get() {
+    //     let fut = thread::Builder::new().name(format!("Thread {}", tid)).scoped(|| {
+    //         Scheduler::current().schedule();
+    //     }).unwrap();
+    //     threads.push(fut);
+    // }
 
-    for fut in threads.into_iter() {
-        fut.join();
-    }
+    // for fut in threads.into_iter() {
+    //     fut.join();
+    // }
 
-    // Scheduler::current().schedule();
+    Scheduler::current().schedule();
 }
