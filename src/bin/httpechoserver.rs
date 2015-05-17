@@ -47,7 +47,7 @@ fn main() {
             Scheduler::spawn(move|| {
                 debug!("Begin handling {:?}", addr);
 
-                let mut writer = stream.try_clone().unwrap();
+                // let mut writer = stream.try_clone().unwrap();
                 let mut reader = BufReader::new(stream);
 
                 let Incoming { version, subject: (method, uri), headers } =
@@ -62,6 +62,7 @@ fn main() {
                 headers.set_raw("Content-Type", vec![b"text/html".to_vec()]);
 
                 debug!("{:?} Headers {:?}", addr, headers);
+                let mut writer = reader.into_inner();
                 let response = Response::new(&mut writer, &mut headers);
                 response.send(message).unwrap_or_else(|err| {
                     panic!("Error occurs while sending to {:?}: {:?}", addr, err);

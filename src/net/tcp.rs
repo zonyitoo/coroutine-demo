@@ -16,7 +16,7 @@ impl TcpListener {
     }
 
     pub fn accept(&self) -> io::Result<TcpStream> {
-        Scheduler::current().wait_event(&self.0, Interest::readable()).unwrap();
+        try!(Scheduler::current().wait_event(&self.0, Interest::readable()));
 
         match self.0.accept() {
             Ok(None) => {
@@ -75,7 +75,7 @@ impl io::Read for TcpStream {
         use mio::TryRead;
 
         debug!("Read: Going to register event");
-        Scheduler::current().wait_event(&self.0, Interest::readable()).unwrap();
+        try!(Scheduler::current().wait_event(&self.0, Interest::readable()));
 
         match self.0.read_slice(buf) {
             Ok(None) => {
@@ -97,7 +97,7 @@ impl io::Write for TcpStream {
 
         debug!("Write: Going to register event");
 
-        Scheduler::current().wait_event(&self.0, Interest::writable()).unwrap();
+        try!(Scheduler::current().wait_event(&self.0, Interest::writable()));
 
         match self.0.write_slice(buf) {
             Ok(None) => {
