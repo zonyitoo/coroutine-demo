@@ -120,7 +120,7 @@ impl Scheduler {
 
             self.eventloop.run_once(&mut self.handler).unwrap();
 
-            debug!("Trying to resume all ready coroutines");
+            debug!("Trying to resume all ready coroutines: {:?}", thread::current().name());
             // Run all ready coroutines
             let mut need_steal = true;
             while let Some(work) = self.workqueue.pop() {
@@ -154,7 +154,7 @@ impl Scheduler {
                 continue;
             }
 
-            debug!("Trying to steal from neighbors");
+            debug!("Trying to steal from neighbors: {:?}", thread::current().name());
             for &(_, ref st) in self.neighbors.iter() {
                 match st.steal() {
                     Stolen::Empty => {},
@@ -199,13 +199,12 @@ impl Handler for SchedulerHandler {
 
         match self.slabs.remove(token) {
             Some((hdl, fd)) => {
-                Scheduler::current().resume(hdl);
-
                 if cfg!(target_os = "linux") {
                     let fd = Io::new(fd);
                     event_loop.deregister(&fd).unwrap();
                     mem::forget(fd);
                 }
+                Scheduler::current().resume(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on writable {:?}", token);
@@ -220,13 +219,12 @@ impl Handler for SchedulerHandler {
 
         match self.slabs.remove(token) {
             Some((hdl, fd)) => {
-                Scheduler::current().resume(hdl);
-
                 if cfg!(target_os = "linux") {
                     let fd = Io::new(fd);
                     event_loop.deregister(&fd).unwrap();
                     mem::forget(fd);
                 }
+                Scheduler::current().resume(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on readable {:?}", token);
@@ -251,7 +249,7 @@ impl TcpListener {
         let token = scheduler.handler.slabs.insert((Coroutine::current(), self.0.as_raw_fd())).unwrap();
         debug!("Accepter token {:?}", token);
         scheduler.eventloop.register_opt(&self.0, token, Interest::readable(),
-                                         PollOpt::edge()|PollOpt::oneshot()).unwrap();
+                                         PollOpt::level()|PollOpt::oneshot()).unwrap();
 
         Coroutine::block();
 
@@ -317,7 +315,7 @@ impl io::Read for TcpStream {
 
         let token = scheduler.handler.slabs.insert((Coroutine::current(), self.0.as_raw_fd())).unwrap();
         scheduler.eventloop.register_opt(&self.0, token, Interest::readable(),
-                                         PollOpt::edge()|PollOpt::oneshot()).unwrap();
+                                         PollOpt::level()|PollOpt::oneshot()).unwrap();
 
         debug!("Read: Blocked current Coroutine ...");
         Coroutine::block();
@@ -347,7 +345,7 @@ impl io::Write for TcpStream {
 
         let token = scheduler.handler.slabs.insert((Coroutine::current(), self.0.as_raw_fd())).unwrap();
         scheduler.eventloop.register_opt(&self.0, token, Interest::writable(),
-                                         PollOpt::edge()|PollOpt::oneshot()).unwrap();
+                                         PollOpt::level()|PollOpt::oneshot()).unwrap();
 
         debug!("Write: Blocked current Coroutine ...");
         Coroutine::block();
@@ -412,17 +410,17 @@ fn main() {
         }
     });
 
-    let mut threads = Vec::new();
-    for tid in 0..num_cpus::get() {
-        let fut = thread::Builder::new().name(format!("Thread {}", tid)).scoped(|| {
-            Scheduler::current().schedule();
-        }).unwrap();
-        threads.push(fut);
-    }
+    // let mut threads = Vec::new();
+    // for tid in 0..num_cpus::get() {
+    //     let fut = thread::Builder::new().name(format!("Thread {}", tid)).scoped(|| {
+    //         Scheduler::current().schedule();
+    //     }).unwrap();
+    //     threads.push(fut);
+    // }
 
-    for fut in threads.into_iter() {
-        fut.join();
-    }
+    // for fut in threads.into_iter() {
+    //     fut.join();
+    // }
 
-    // Scheduler::current().schedule();
+    Scheduler::current().schedule();
 }
