@@ -1,6 +1,6 @@
 # Coroutine I/O Demo
 
-This is a demostration project for [coroutine-rs](https://github.com/rustcc/coroutine-rs).
+This is a demonstration project for [coroutine-rs](https://github.com/rustcc/coroutine-rs).
 
 ## What is this for?
 
