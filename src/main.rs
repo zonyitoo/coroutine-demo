@@ -22,7 +22,9 @@ mod net;
 fn main() {
     env_logger::init().unwrap();
 
-    let matches = App::new("coroutine-demo").version("0.1.0").author("Y. T. Chung <zonyitoo@gmail.com>")
+    let matches = App::new("coroutine-demo")
+            .version(env!("CARGO_PKG_VERSION"))
+            .author("Y. T. Chung <zonyitoo@gmail.com>")
             .arg(Arg::with_name("BIND").short("b").long("bind").takes_value(true).required(true)
                     .help("Listening on this address"))
             .arg(Arg::with_name("THREADS").short("t").long("threads").takes_value(true).required(true)
