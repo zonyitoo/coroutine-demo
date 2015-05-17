@@ -1,23 +1,16 @@
-#![feature(scoped, libc)]
-
-extern crate coroutine;
-extern crate num_cpus;
-extern crate deque;
+extern crate clap;
 #[macro_use] extern crate log;
 extern crate env_logger;
 extern crate mio;
-extern crate libc;
-extern crate clap;
+
+extern crate cosupport;
 
 use mio::Socket;
 
 use clap::{Arg, App};
 
-use scheduler::Scheduler;
-use net::tcp::TcpListener;
-
-mod scheduler;
-mod net;
+use cosupport::scheduler::Scheduler;
+use cosupport::net::tcp::TcpListener;
 
 fn main() {
     env_logger::init().unwrap();

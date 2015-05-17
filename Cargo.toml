@@ -3,8 +3,12 @@ name = "coro-demo"
 version = "0.1.0"
 authors = ["Y. T. Chung <zonyitoo@gmail.com>"]
 
+[lib]
+name = "cosupport"
+
 [[bin]]
-name = "coro-demo"
+name = "echoserver"
+path = "src/bin/echoserver.rs"
 
 [dependencies]
 coroutine = "*"
