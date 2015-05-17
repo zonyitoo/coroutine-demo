@@ -44,26 +44,33 @@ fn main() {
             info!("Accept connection: {:?}", stream.peer_addr().unwrap());
 
             Scheduler::spawn(move|| {
+                debug!("Begin handling {:?}", stream.peer_addr().unwrap());
+
                 let mut writer = stream.try_clone().unwrap();
                 let mut reader = BufReader::new(stream);
 
-                let Incoming { version, subject: (method, uri), headers } = parse_request(&mut reader).unwrap();
+                let Incoming { version, subject: (method, uri), headers } =
+                    parse_request(&mut reader).unwrap_or_else(|err| {
+                        panic!("Error occurs while parsing header: {:?}", err);
+                    });
 
                 debug!("version {:?}, subject: ({:?}, {:?}), {:?}", version, method, uri, headers);
 
                 let message = b"Hello World";
                 let mut headers = Headers::new();
-                headers.set_raw("Content-Length", vec![message.len().to_string().as_bytes().to_vec()]);
                 headers.set_raw("Content-Type", vec![b"text/html".to_vec()]);
 
                 debug!("Headers {:?}", headers);
 
+                // let addr = writer.peer_addr().unwrap();
                 {
                     let response = Response::new(&mut writer, &mut headers);
-                    response.send(message).unwrap();
+                    response.send(message).unwrap_or_else(|err| {
+                        panic!("Error occurs while sending: {:?}", err);
+                    });
                 }
 
-                info!("{:?} closed", writer.peer_addr().unwrap());
+                // info!("{:?} closed", addr);
             });
         }
     });
