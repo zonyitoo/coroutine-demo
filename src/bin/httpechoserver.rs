@@ -41,17 +41,18 @@ fn main() {
 
         loop {
             let stream = server.accept().unwrap();
-            info!("Accept connection: {:?}", stream.peer_addr().unwrap());
+            let addr = stream.peer_addr().unwrap();
+            info!("Accept connection: {:?}", addr);
 
             Scheduler::spawn(move|| {
-                debug!("Begin handling {:?}", stream.peer_addr().unwrap());
+                debug!("Begin handling {:?}", addr);
 
                 let mut writer = stream.try_clone().unwrap();
                 let mut reader = BufReader::new(stream);
 
                 let Incoming { version, subject: (method, uri), headers } =
                     parse_request(&mut reader).unwrap_or_else(|err| {
-                        panic!("Error occurs while parsing header: {:?}", err);
+                        panic!("Error occurs while parsing request: {:?}", err);
                     });
 
                 debug!("version {:?}, subject: ({:?}, {:?}), {:?}", version, method, uri, headers);
@@ -60,17 +61,12 @@ fn main() {
                 let mut headers = Headers::new();
                 headers.set_raw("Content-Type", vec![b"text/html".to_vec()]);
 
-                debug!("Headers {:?}", headers);
-
-                // let addr = writer.peer_addr().unwrap();
-                {
-                    let response = Response::new(&mut writer, &mut headers);
-                    response.send(message).unwrap_or_else(|err| {
-                        panic!("Error occurs while sending: {:?}", err);
-                    });
-                }
-
-                // info!("{:?} closed", addr);
+                debug!("{:?} Headers {:?}", addr, headers);
+                let response = Response::new(&mut writer, &mut headers);
+                response.send(message).unwrap_or_else(|err| {
+                    panic!("Error occurs while sending to {:?}: {:?}", addr, err);
+                });
+                info!("{:?} closed", addr);
             });
         }
     });

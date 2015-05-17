@@ -116,3 +116,17 @@ impl io::Write for TcpStream {
         Ok(())
     }
 }
+
+impl Deref for TcpStream {
+    type Target = ::mio::tcp::TcpStream;
+
+    fn deref(&self) -> &::mio::tcp::TcpStream {
+        &self.0
+    }
+}
+
+impl DerefMut for TcpStream {
+    fn deref_mut(&mut self) -> &mut ::mio::tcp::TcpStream {
+        &mut self.0
+    }
+}
