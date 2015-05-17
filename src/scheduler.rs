@@ -174,6 +174,7 @@ impl Scheduler {
     }
 
     pub fn run(threads: usize) {
+        assert!(threads >= 1, "Threads must >= 1");
         let mut futs = Vec::new();
         for tid in 0..threads {
             let fut = thread::Builder::new().name(format!("Thread {}", tid)).scoped(|| {
