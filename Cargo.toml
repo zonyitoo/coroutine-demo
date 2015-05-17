@@ -13,7 +13,7 @@ deque = "*"
 log = "*"
 env_logger = "*"
 #mio = "*"
-lazy_static = "*"
+clap = "*"
 
 #[dependencies.deque]
 #path = "/Users/zonyitoo/Projects/deque"
