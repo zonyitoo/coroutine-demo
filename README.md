@@ -25,3 +25,5 @@ We are going to add a scheduler (work-stealing) into coroutine-rs, but we need t
 ## Known bugs
 
 - [ ] Echo server may be blocked when enabling multi-thread mode
+
+- [ ] Simple HTTP server cannot handle too much concurrent requests
