@@ -10,6 +10,10 @@ name = "cosupport"
 name = "echoserver"
 path = "src/bin/echoserver.rs"
 
+[[bin]]
+name = "httpechoserver"
+path = "src/bin/httpechoserver.rs"
+
 [dependencies]
 coroutine = "*"
 num_cpus = "*"
@@ -18,10 +22,11 @@ log = "*"
 env_logger = "*"
 #mio = "*"
 clap = "*"
+hyper = "*"
 
 #[dependencies.deque]
 #path = "/Users/zonyitoo/Projects/deque"
 
 [dependencies.mio]
-git = "https://github.com/carllerche/mio.git"
-#path = "/Users/zonyitoo/Projects/mio"
+#git = "https://github.com/carllerche/mio.git"
+path = "/Users/zonyitoo/Projects/mio"
