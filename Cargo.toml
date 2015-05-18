@@ -28,6 +28,6 @@ hyper = "*"
 #path = "/Users/zonyitoo/Projects/deque"
 
 [dependencies.mio]
-#git = "https://github.com/carllerche/mio.git"
-path = "/Users/zonyitoo/Projects/mio"
+git = "https://github.com/carllerche/mio.git"
+#path = "/Users/zonyitoo/Projects/mio"
 #git = "https://github.com/zonyitoo/mio.git"
