@@ -66,6 +66,7 @@ impl Scheduler {
             let _ = rtx.send(SchedMessage::NewNeighbor(tx.clone(), stealer.clone()));
         }
 
+        let neighbors = guard.clone();
         guard.push((tx, stealer.clone()));
 
         Scheduler {
@@ -74,7 +75,7 @@ impl Scheduler {
 
             commchannel: rx,
 
-            neighbors: guard.clone(),
+            neighbors: neighbors,
 
             eventloop: EventLoop::new().unwrap(),
             handler: SchedulerHandler::new(),
@@ -161,7 +162,7 @@ impl Scheduler {
     pub fn wait_event<E: Evented>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
         let token = self.handler.slabs.insert((Coroutine::current(), fd.as_raw_fd())).unwrap();
         try!(self.eventloop.register_opt(fd, token, interest,
-                                         PollOpt::level()|PollOpt::oneshot()));
+                                         PollOpt::edge()|PollOpt::oneshot()));
 
         debug!("wait_event: Blocked current Coroutine ...");
         Coroutine::block();

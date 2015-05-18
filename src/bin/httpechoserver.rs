@@ -1,3 +1,5 @@
+#![feature(io)]
+
 extern crate clap;
 #[macro_use] extern crate log;
 extern crate env_logger;
@@ -45,6 +47,7 @@ fn main() {
             info!("Accept connection: {:?}", addr);
 
             Scheduler::spawn(move|| {
+                use std::io::{Write};
                 debug!("Begin handling {:?}", addr);
 
                 // let mut writer = stream.try_clone().unwrap();
@@ -52,7 +55,7 @@ fn main() {
 
                 let Incoming { version, subject: (method, uri), headers } =
                     parse_request(&mut reader).unwrap_or_else(|err| {
-                        panic!("Error occurs while parsing request: {:?}", err);
+                        panic!("Error occurs while parsing request {:?}: {:?}", addr, err);
                     });
 
                 debug!("version {:?}, subject: ({:?}, {:?}), {:?}", version, method, uri, headers);
@@ -62,10 +65,17 @@ fn main() {
                 headers.set_raw("Content-Type", vec![b"text/html".to_vec()]);
 
                 debug!("{:?} Headers {:?}", addr, headers);
+                let mut wbuf = Vec::new();
+                {
+                    let response = Response::new(&mut wbuf, &mut headers);
+                    response.send(message).unwrap_or_else(|err| {
+                        panic!("Error occurs while sending to {:?}: {:?}", addr, err);
+                    });
+                }
+
                 let mut writer = reader.into_inner();
-                let response = Response::new(&mut writer, &mut headers);
-                response.send(message).unwrap_or_else(|err| {
-                    panic!("Error occurs while sending to {:?}: {:?}", addr, err);
+                writer.write_all(&wbuf[..]).unwrap_or_else(|err| {
+                    panic!("Error occurs while writing to {:?}: {:?}", addr, err);
                 });
                 info!("{:?} closed", addr);
             });
