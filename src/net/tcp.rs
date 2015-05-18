@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
 
 use mio::{self, Interest};
+use mio::buf::{Buf, MutBuf, MutSliceBuf, SliceBuf};
 
 use scheduler::Scheduler;
 
@@ -77,17 +78,27 @@ impl io::Read for TcpStream {
         debug!("Read: Going to register event");
         try!(Scheduler::current().wait_event(&self.0, Interest::readable()));
 
-        match self.0.read_slice(buf) {
-            Ok(None) => {
-                panic!("TcpStream read WOULDBLOCK");
-            },
-            Ok(Some(len)) => {
-                Ok(len)
-            },
-            Err(err) => {
-                Err(err)
+        let mut buf = MutSliceBuf::wrap(buf);
+        while buf.has_remaining() {
+            match self.0.read(&mut buf) {
+                Ok(None) => {
+                    debug!("TcpStream read WOULDBLOCK");
+                    break;
+                },
+                Ok(Some(0)) => {
+                    debug!("TcpStream read 0 bytes");
+                    break;
+                }
+                Ok(Some(len)) => {
+                    debug!("TcpStream read {} bytes", len);
+                },
+                Err(err) => {
+                    return Err(err);
+                }
             }
         }
+
+        Ok(buf.mut_bytes().len())
     }
 }
 
@@ -99,17 +110,29 @@ impl io::Write for TcpStream {
 
         try!(Scheduler::current().wait_event(&self.0, Interest::writable()));
 
-        match self.0.write_slice(buf) {
-            Ok(None) => {
-                panic!("TcpStream write WOULDBLOCK");
-            },
-            Ok(Some(len)) => {
-                Ok(len)
-            },
-            Err(err) => {
-                Err(err)
+        let mut buf = SliceBuf::wrap(buf);
+        let mut total_len = 0;
+        while buf.has_remaining() {
+            match self.0.write(&mut buf) {
+                Ok(None) => {
+                    debug!("TcpStream write WOULDBLOCK");
+                    break;
+                },
+                Ok(Some(0)) => {
+                    debug!("TcpStream write 0 bytes");
+                    break;
+                }
+                Ok(Some(len)) => {
+                    debug!("TcpStream written {} bytes", len);
+                    total_len += len;
+                },
+                Err(err) => {
+                    return Err(err)
+                }
             }
         }
+
+        Ok(total_len)
     }
 
     fn flush(&mut self) -> io::Result<()> {
