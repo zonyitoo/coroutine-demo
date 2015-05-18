@@ -77,6 +77,7 @@ impl io::Read for TcpStream {
 
         debug!("Read: Going to register event");
         try!(Scheduler::current().wait_event(&self.0, Interest::readable()));
+        debug!("Read: Got read event");
 
         let mut buf = MutSliceBuf::wrap(buf);
         while buf.has_remaining() {
@@ -107,8 +108,8 @@ impl io::Write for TcpStream {
         use mio::TryWrite;
 
         debug!("Write: Going to register event");
-
         try!(Scheduler::current().wait_event(&self.0, Interest::writable()));
+        debug!("Write: Got write event");
 
         let mut buf = SliceBuf::wrap(buf);
         let mut total_len = 0;

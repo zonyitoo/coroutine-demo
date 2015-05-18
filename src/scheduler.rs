@@ -7,6 +7,8 @@ use std::mem;
 use std::cell::UnsafeCell;
 use std::io;
 use std::os::unix::io::{RawFd, AsRawFd};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use coroutine::spawn;
 use coroutine::coroutine::{State, Handle, Coroutine};
@@ -37,6 +39,7 @@ thread_local!(static SCHEDULER: UnsafeCell<Scheduler> = UnsafeCell::new(Schedule
 
 pub enum SchedMessage {
     NewNeighbor(Sender<SchedMessage>, Stealer<Handle>),
+    Shutdown,
 }
 
 pub struct Scheduler {
@@ -104,6 +107,10 @@ impl Scheduler {
                 Ok(SchedMessage::NewNeighbor(tx, st)) => {
                     self.neighbors.push((tx, st));
                 },
+                Ok(SchedMessage::Shutdown) => {
+                    info!("Shutting down");
+                    break;
+                },
                 Err(TryRecvError::Empty) => {},
                 _ => panic!("Receiving from channel: Unknown message")
             }
@@ -124,11 +131,17 @@ impl Scheduler {
                         }
 
                         match work.state() {
+                            State::Normal | State::Running => {
+                                unreachable!();
+                            },
                             State::Suspended => {
                                 debug!("Coroutine suspended, going to be resumed next round");
                                 self.workqueue.push(work);
                             },
-                            _ => {
+                            State::Blocked => {
+                                debug!("Coroutine blocked, maybe waiting for I/O");
+                            },
+                            State::Finished | State::Panicked => {
                                 debug!("Coroutine state: {:?}, will not be resumed automatically", work.state());
                             }
                         }
@@ -166,6 +179,7 @@ impl Scheduler {
 
         debug!("wait_event: Blocked current Coroutine ...; token={:?}", token);
         Coroutine::block();
+        debug!("wait_event: Waked up; token={:?}", token);
 
         Ok(())
     }
@@ -176,17 +190,14 @@ impl Scheduler {
 
     pub fn run(threads: usize) {
         assert!(threads >= 1, "Threads must >= 1");
-        let mut futs = Vec::new();
-        for tid in 0..threads {
-            let fut = thread::Builder::new().name(format!("Thread {}", tid)).scoped(|| {
+
+        for tid in 0..threads - 1 {
+            thread::Builder::new().name(format!("Thread {}", tid)).spawn(|| {
                 Scheduler::current().schedule();
             }).unwrap();
-            futs.push(fut);
         }
 
-        for fut in futs.into_iter() {
-            fut.join();
-        }
+        Scheduler::current().schedule();
     }
 }
 
@@ -228,9 +239,9 @@ impl Handler for SchedulerHandler {
 
     }
 
-    fn readable(&mut self, event_loop: &mut EventLoop<Self>, token: Token, _: ReadHint) {
+    fn readable(&mut self, event_loop: &mut EventLoop<Self>, token: Token, hint: ReadHint) {
 
-        debug!("In readable, token {:?}", token);
+        debug!("In readable, token {:?}, hint {:?}", token, hint);
 
         match self.slabs.remove(token) {
             Some((hdl, fd)) => {
