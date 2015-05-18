@@ -88,7 +88,7 @@ impl io::Read for TcpStream {
                 Ok(Some(0)) => {
                     debug!("TcpStream read 0 bytes");
                     break;
-                }
+                },
                 Ok(Some(len)) => {
                     debug!("TcpStream read {} bytes", len);
                 },
@@ -121,7 +121,7 @@ impl io::Write for TcpStream {
                 Ok(Some(0)) => {
                     debug!("TcpStream write 0 bytes");
                     break;
-                }
+                },
                 Ok(Some(len)) => {
                     debug!("TcpStream written {} bytes", len);
                     total_len += len;
