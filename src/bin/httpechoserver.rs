@@ -51,14 +51,29 @@ fn main() {
                 // let mut writer = stream.try_clone().unwrap();
                 let mut reader = BufReader::new(stream);
 
+                // FIXME: parse_request may return Err with reason ConnectionAborted
+                // Maybe cause by reader returns 0 byte
+                //
+                // Normally, this is because the socket is already closed. But actually ab will reports
+                // an error about: apr_socket_recv: Connection reset by peer (54)
+                //
+                // By tracing syscalls, it seems that the eventloop notify that the fd can read,
+                // but wen we actually read, it returns 0 byte (EOF). Not always happens, still wondering why.
+                //
+                // I don't think ab has a problem, it should be the library who shutdown the fd by accident.
+                // I have no idea why. Need help.
                 let Incoming { version, subject: (method, uri), headers } =
-                    parse_request(&mut reader).unwrap_or_else(|err| {
-                        panic!("Error occurs while parsing request {:?}: {:?}", addr, err);
-                    });
+                    match parse_request(&mut reader) {
+                        Ok(com) => com,
+                        Err(err) => {
+                            // The cat shuts its eyes when stealing cream.
+                            panic!("Error occurs while parsing request {:?}: {:?}", addr, err);
+                        }
+                    };
 
                 debug!("version {:?}, subject: ({:?}, {:?}), {:?}", version, method, uri, headers);
 
-                let message = b"Hello World";
+                let message = b"<html><head></head><body>Hello World</body></html>\n";
                 let mut headers = Headers::new();
                 headers.set_raw("Content-Type", vec![b"text/html".to_vec()]);
 

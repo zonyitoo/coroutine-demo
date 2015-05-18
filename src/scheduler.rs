@@ -164,7 +164,7 @@ impl Scheduler {
         try!(self.eventloop.register_opt(fd, token, interest,
                                          PollOpt::edge()|PollOpt::oneshot()));
 
-        debug!("wait_event: Blocked current Coroutine ...");
+        debug!("wait_event: Blocked current Coroutine ...; token={:?}", token);
         Coroutine::block();
 
         Ok(())
