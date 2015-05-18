@@ -26,7 +26,7 @@ fn main() {
 
     let bind_addr = matches.value_of("BIND").unwrap().to_owned();
 
-    Scheduler::spawn(move|| {
+    Scheduler::run(move|| {
         let server = TcpListener::bind(&bind_addr.parse().unwrap()).unwrap();
         server.set_reuseaddr(true).unwrap();
         server.set_reuseport(true).unwrap();
@@ -62,7 +62,5 @@ fn main() {
                 info!("{:?} closed", stream.peer_addr().unwrap());
             });
         }
-    });
-
-    Scheduler::run(matches.value_of("THREADS").unwrap().parse().unwrap());
+    }, matches.value_of("THREADS").unwrap().parse().unwrap());
 }

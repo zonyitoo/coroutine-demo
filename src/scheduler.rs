@@ -7,8 +7,7 @@ use std::mem;
 use std::cell::UnsafeCell;
 use std::io;
 use std::os::unix::io::{RawFd, AsRawFd};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{ATOMIC_BOOL_INIT, AtomicBool, Ordering};
 
 use coroutine::spawn;
 use coroutine::coroutine::{State, Handle, Coroutine};
@@ -21,6 +20,7 @@ use mio::util::Slab;
 static mut THREAD_HANDLES: *const Mutex<Vec<(Sender<SchedMessage>, Stealer<Handle>)>> =
     0 as *const Mutex<Vec<(Sender<SchedMessage>, Stealer<Handle>)>>;
 static THREAD_HANDLES_ONCE: Once = ONCE_INIT;
+static SCHEDULER_HAS_STARTED: AtomicBool = ATOMIC_BOOL_INIT;
 
 fn schedulers() -> &'static Mutex<Vec<(Sender<SchedMessage>, Stealer<Handle>)>> {
     unsafe {
@@ -99,6 +99,39 @@ impl Scheduler {
         let sc = Scheduler::current();
 
         sc.workqueue.push(coro);
+    }
+
+    pub fn run<F>(f: F, threads: usize)
+            where F: FnOnce() + Send + 'static {
+        if SCHEDULER_HAS_STARTED.compare_and_swap(false, true, Ordering::SeqCst) != false {
+            panic!("Schedulers are already running!");
+        }
+
+        Scheduler::spawn(|| {
+            struct Guard;
+
+            // Send Shutdown to all schedulers
+            impl Drop for Guard {
+                fn drop(&mut self) {
+                    let guard = match schedulers().lock() {
+                        Ok(g) => g,
+                        Err(poisoned) => poisoned.into_inner()
+                    };
+
+                    for &(ref chan, _) in guard.iter() {
+                        let _ = chan.send(SchedMessage::Shutdown);
+                    }
+                }
+            }
+
+            let _guard = Guard;
+
+            f();
+        });
+
+        Scheduler::start(threads);
+
+        SCHEDULER_HAS_STARTED.store(false, Ordering::SeqCst);
     }
 
     fn schedule(&mut self) {
@@ -188,7 +221,7 @@ impl Scheduler {
         self.workqueue.push(handle);
     }
 
-    pub fn run(threads: usize) {
+    fn start(threads: usize) {
         assert!(threads >= 1, "Threads must >= 1");
 
         for tid in 0..threads - 1 {

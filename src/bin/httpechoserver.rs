@@ -32,7 +32,7 @@ fn main() {
 
     let bind_addr = matches.value_of("BIND").unwrap().to_owned();
 
-    Scheduler::spawn(move|| {
+    Scheduler::run(move|| {
         let server = TcpListener::bind(&bind_addr.parse().unwrap()).unwrap();
         server.set_reuseaddr(true).unwrap();
         server.set_reuseport(true).unwrap();
@@ -45,7 +45,7 @@ fn main() {
             info!("Accept connection: {:?}", addr);
 
             Scheduler::spawn(move|| {
-                use std::io::{Write};
+                use std::io::Write;
                 debug!("Begin handling {:?}", addr);
 
                 // let mut writer = stream.try_clone().unwrap();
@@ -93,7 +93,5 @@ fn main() {
                 info!("{:?} closed", addr);
             });
         }
-    });
-
-    Scheduler::run(matches.value_of("THREADS").unwrap_or("1").parse().unwrap());
+    }, matches.value_of("THREADS").unwrap_or("1").parse().unwrap());
 }

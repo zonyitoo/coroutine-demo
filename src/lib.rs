@@ -1,4 +1,4 @@
-#![feature(scoped, libc)]
+#![feature(libc, std_misc)]
 
 extern crate coroutine;
 extern crate num_cpus;
