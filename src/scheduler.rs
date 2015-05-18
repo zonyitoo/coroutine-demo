@@ -159,7 +159,15 @@ impl Scheduler {
                         debug!("Resuming Coroutine: {:?}", work);
                         need_steal = false;
 
-                        if let Err(msg) = work.resume() {
+                        if let Err(err) = work.resume() {
+                            let msg = match err.downcast_ref::<&'static str>() {
+                                Some(s) => *s,
+                                None => match err.downcast_ref::<String>() {
+                                    Some(s) => &s[..],
+                                    None => "Box<Any>",
+                                }
+                            };
+
                             error!("Coroutine panicked! {:?}", msg);
                         }
 
