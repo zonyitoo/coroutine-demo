@@ -7,7 +7,8 @@ use std::mem;
 use std::cell::UnsafeCell;
 use std::io;
 use std::os::unix::io::{RawFd, AsRawFd};
-use std::sync::atomic::{ATOMIC_BOOL_INIT, AtomicBool, Ordering};
+use std::sync::atomic::{ATOMIC_BOOL_INIT, AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use coroutine::spawn;
 use coroutine::coroutine::{State, Handle, Coroutine};
@@ -103,9 +104,24 @@ impl Scheduler {
 
     pub fn run<F>(f: F, threads: usize)
             where F: FnOnce() + Send + 'static {
+
+        assert!(threads >= 1, "Threads must >= 1");
         if SCHEDULER_HAS_STARTED.compare_and_swap(false, true, Ordering::SeqCst) != false {
             panic!("Schedulers are already running!");
         }
+
+        // Start worker threads first
+        let counter = Arc::new(AtomicUsize::new(0));
+        for tid in 0..threads - 1 {
+            let counter = counter.clone();
+            thread::Builder::new().name(format!("Thread {}", tid)).spawn(move|| {
+                let current = Scheduler::current();
+                counter.fetch_add(1, Ordering::SeqCst);
+                current.schedule();
+            }).unwrap();
+        }
+
+        while counter.load(Ordering::SeqCst) != threads - 1 {}
 
         Scheduler::spawn(|| {
             struct Guard;
@@ -129,7 +145,7 @@ impl Scheduler {
             f();
         });
 
-        Scheduler::start(threads);
+        Scheduler::current().schedule();
 
         SCHEDULER_HAS_STARTED.store(false, Ordering::SeqCst);
     }
@@ -227,18 +243,6 @@ impl Scheduler {
 
     fn resume(&mut self, handle: Handle) {
         self.workqueue.push(handle);
-    }
-
-    fn start(threads: usize) {
-        assert!(threads >= 1, "Threads must >= 1");
-
-        for tid in 0..threads - 1 {
-            thread::Builder::new().name(format!("Thread {}", tid)).spawn(|| {
-                Scheduler::current().schedule();
-            }).unwrap();
-        }
-
-        Scheduler::current().schedule();
     }
 }
 
