@@ -8,8 +8,6 @@ extern crate cosupport;
 
 use std::net::SocketAddr;
 
-use mio::Socket;
-
 use clap::{Arg, App};
 
 use hyper::http::{parse_request, Incoming};
@@ -41,7 +39,7 @@ fn main() {
             &SocketAddr::V6(..) => TcpSocket::v6(),
         }.unwrap();
         server.set_reuseaddr(true).unwrap();
-        server.set_reuseport(true).unwrap();
+        // server.set_reuseport(true).unwrap();
 
         server.bind(&addr).unwrap();
         let server = server.listen(64).unwrap();
