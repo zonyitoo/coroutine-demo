@@ -221,7 +221,7 @@ impl Scheduler {
                     Stolen::Data(coro) => {
                         self.workqueue.push(coro);
 
-                        break;
+                        // break;
                     },
                     Stolen::Abort => {}
                 }
@@ -232,7 +232,7 @@ impl Scheduler {
     pub fn wait_event<E: Evented>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
         let token = self.handler.slabs.insert((Coroutine::current(), fd.as_raw_fd())).unwrap();
         try!(self.eventloop.register_opt(fd, token, interest,
-                                         PollOpt::edge()|PollOpt::oneshot()));
+                                         PollOpt::level()|PollOpt::oneshot()));
 
         debug!("wait_event: Blocked current Coroutine ...; token={:?}", token);
         Coroutine::block();

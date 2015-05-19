@@ -35,7 +35,7 @@ fn main() {
     Scheduler::run(move|| {
         let server = TcpListener::bind(&bind_addr.parse().unwrap()).unwrap();
         server.set_reuseaddr(true).unwrap();
-        // server.set_reuseport(true).unwrap();
+        server.set_reuseport(true).unwrap();
 
         info!("Listening on {:?}", server.local_addr().unwrap());
 
