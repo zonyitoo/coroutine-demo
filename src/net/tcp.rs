@@ -125,6 +125,7 @@ impl io::Read for TcpStream {
         use mio::TryRead;
 
         let mut buf = MutSliceBuf::wrap(buf);
+        let mut total_len = 0;
         while buf.has_remaining() {
             match self.0.read(&mut buf) {
                 Ok(None) => {
@@ -137,6 +138,7 @@ impl io::Read for TcpStream {
                 },
                 Ok(Some(len)) => {
                     debug!("TcpStream read {} bytes", len);
+                    total_len += len;
                 },
                 Err(err) => {
                     return Err(err);
@@ -144,7 +146,7 @@ impl io::Read for TcpStream {
             }
         }
 
-        if buf.mut_bytes().len() != 0 {
+        if total_len != 0 {
             // We got something, just return!
             return Ok(buf.mut_bytes().len());
         }
@@ -165,6 +167,7 @@ impl io::Read for TcpStream {
                 },
                 Ok(Some(len)) => {
                     debug!("TcpStream read {} bytes", len);
+                    total_len += len;
                 },
                 Err(err) => {
                     return Err(err);
@@ -172,7 +175,7 @@ impl io::Read for TcpStream {
             }
         }
 
-        Ok(buf.mut_bytes().len())
+        Ok(total_len)
     }
 }
 
