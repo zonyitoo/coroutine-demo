@@ -6,6 +6,8 @@ extern crate hyper;
 
 extern crate cosupport;
 
+use std::net::SocketAddr;
+
 use mio::Socket;
 
 use clap::{Arg, App};
@@ -16,7 +18,7 @@ use hyper::server::Response;
 use hyper::header::Headers;
 
 use cosupport::scheduler::Scheduler;
-use cosupport::net::tcp::TcpListener;
+use cosupport::net::tcp::TcpSocket;
 
 fn main() {
     env_logger::init().unwrap();
@@ -33,9 +35,16 @@ fn main() {
     let bind_addr = matches.value_of("BIND").unwrap().to_owned();
 
     Scheduler::run(move|| {
-        let server = TcpListener::bind(&bind_addr.parse().unwrap()).unwrap();
+        let addr = bind_addr.parse().unwrap();
+        let server = match &addr {
+            &SocketAddr::V4(..) => TcpSocket::v4(),
+            &SocketAddr::V6(..) => TcpSocket::v6(),
+        }.unwrap();
         server.set_reuseaddr(true).unwrap();
         server.set_reuseport(true).unwrap();
+
+        server.bind(&addr).unwrap();
+        let server = server.listen(64).unwrap();
 
         info!("Listening on {:?}", server.local_addr().unwrap());
 
