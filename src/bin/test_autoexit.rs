@@ -3,7 +3,7 @@ extern crate cosupport;
 use cosupport::scheduler::Scheduler;
 
 fn main() {
-    Scheduler::main(|| {
+    Scheduler::run(|| {
         Scheduler::spawn(|| {
             println!("Fuck something ...");
         });
