@@ -134,6 +134,9 @@ impl io::Read for TcpStream {
                 },
                 Ok(Some(0)) => {
                     debug!("TcpStream read 0 bytes");
+                    if total_len == 0 {
+                        return Ok(0);
+                    }
                     break;
                 },
                 Ok(Some(len)) => {
@@ -148,7 +151,7 @@ impl io::Read for TcpStream {
 
         if total_len != 0 {
             // We got something, just return!
-            return Ok(buf.mut_bytes().len());
+            return Ok(total_len);
         }
 
         debug!("Read: Going to register event");
@@ -194,6 +197,9 @@ impl io::Write for TcpStream {
                 },
                 Ok(Some(0)) => {
                     debug!("TcpStream write 0 bytes");
+                    if total_len == 0 {
+                        return Ok(0);
+                    }
                     break;
                 },
                 Ok(Some(len)) => {

@@ -42,7 +42,7 @@ fn main() {
         // server.set_reuseport(true).unwrap();
 
         server.bind(&addr).unwrap();
-        let server = server.listen(64).unwrap();
+        let server = server.listen(2048).unwrap();
 
         info!("Listening on {:?}", server.local_addr().unwrap());
 
