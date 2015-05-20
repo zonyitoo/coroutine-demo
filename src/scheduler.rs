@@ -105,6 +105,7 @@ impl Scheduler {
         let sc = Scheduler::current();
 
         sc.workqueue.push(coro);
+        Coroutine::sched();
     }
 
     pub fn run<F>(f: F, threads: usize)
