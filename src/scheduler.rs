@@ -8,6 +8,8 @@ use std::cell::UnsafeCell;
 use std::io;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::io::{AsRawHandle, AsRawSocket};
 use std::sync::atomic::{ATOMIC_BOOL_INIT, AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::convert::From;
@@ -231,8 +233,14 @@ impl Scheduler {
         }
     }
 
-    #[cfg(unix)]
-    pub fn wait_event<E: Evented + AsRawFd>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
+    fn resume(&mut self, handle: Handle) {
+        self.workqueue.push(handle);
+    }
+}
+
+#[cfg(unix)]
+impl Scheduler {
+    pub fn wait_socket_event<E: Evented + AsRawFd>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
         let token = self.handler.slabs.insert((Coroutine::current(), From::from(fd.as_raw_fd()))).unwrap();
         try!(self.eventloop.register_opt(fd, token, interest,
                                          PollOpt::level()|PollOpt::oneshot()));
@@ -244,10 +252,46 @@ impl Scheduler {
         Ok(())
     }
 
-    fn resume(&mut self, handle: Handle) {
-        self.workqueue.push(handle);
+    pub fn wait_file_event<E: Evented + AsRawFd>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
+        let token = self.handler.slabs.insert((Coroutine::current(), From::from(fd.as_raw_fd()))).unwrap();
+        try!(self.eventloop.register_opt(fd, token, interest,
+                                         PollOpt::level()|PollOpt::oneshot()));
+
+        debug!("wait_event: Blocked current Coroutine ...; token={:?}", token);
+        Coroutine::block();
+        debug!("wait_event: Waked up; token={:?}", token);
+
+        Ok(())
     }
 }
+
+// #[cfg(windows)]
+// impl Scheduler {
+//     pub fn wait_socket_event<E: Evented + AsRawSocket>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
+//         let token = self.handler.slabs.insert((Coroutine::current(), From::from(fd.as_raw_socket()))).unwrap();
+//         try!(self.eventloop.register_opt(fd, token, interest,
+//                                          PollOpt::level()|PollOpt::oneshot()));
+
+//         debug!("wait_event: Blocked current Coroutine ...; token={:?}", token);
+//         Coroutine::block();
+//         debug!("wait_event: Waked up; token={:?}", token);
+
+//         Ok(())
+//     }
+
+//     pub fn wait_file_event<E: Evented + AsRawHandle>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
+//         let token = self.handler.slabs.insert((Coroutine::current(), From::from(fd.as_raw_handle()))).unwrap();
+//         try!(self.eventloop.register_opt(fd, token, interest,
+//                                          PollOpt::level()|PollOpt::oneshot()));
+
+//         debug!("wait_event: Blocked current Coroutine ...; token={:?}", token);
+//         Coroutine::block();
+//         debug!("wait_event: Waked up; token={:?}", token);
+
+//         Ok(())
+//     }
+// }
+
 
 struct SchedulerHandler {
     slabs: Slab<(Handle, Io)>,
