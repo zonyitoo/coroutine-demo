@@ -50,7 +50,7 @@ pub enum SchedMessage {
 
 pub struct Scheduler {
     workqueue: Worker<Handle>,
-    // workstealer: Stealer<Handle>,
+    workstealer: Stealer<Handle>,
 
     commchannel: Receiver<SchedMessage>,
 
@@ -80,7 +80,7 @@ impl Scheduler {
 
         Scheduler {
             workqueue: worker,
-            // workstealer: stealer,
+            workstealer: stealer,
 
             commchannel: rx,
 
@@ -174,7 +174,8 @@ impl Scheduler {
             debug!("Trying to resume all ready coroutines: {:?}", thread::current().name());
             // Run all ready coroutines
             let mut need_steal = true;
-            while let Some(work) = self.workqueue.pop() {
+            // while let Some(work) = self.workqueue.pop() {
+            while let Stolen::Data(work) = self.workstealer.steal() {
                 match work.state() {
                     State::Suspended | State::Blocked => {
                         debug!("Resuming Coroutine: {:?}", work);
