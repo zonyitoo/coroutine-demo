@@ -20,6 +20,8 @@ use deque::{BufferPool, Stealer, Worker, Stolen};
 
 use mio::{EventLoop, Evented, Handler, Token, ReadHint, Interest, PollOpt};
 use mio::util::Slab;
+#[cfg(target_os = "linux")]
+use mio::Io;
 
 static mut THREAD_HANDLES: *const Mutex<Vec<(Sender<SchedMessage>, Stealer<Handle>)>> =
     0 as *const Mutex<Vec<(Sender<SchedMessage>, Stealer<Handle>)>>;
@@ -237,6 +239,16 @@ impl Scheduler {
     }
 }
 
+const MAX_TOKEN_NUM: usize = 102400;
+impl SchedulerHandler {
+    fn new() -> SchedulerHandler {
+        SchedulerHandler {
+            // slabs: Slab::new_starting_at(Token(1), MAX_TOKEN_NUM),
+            slabs: Slab::new(MAX_TOKEN_NUM),
+        }
+    }
+}
+
 #[cfg(any(target_os = "linux",
           target_os = "android"))]
 impl Scheduler {
@@ -332,16 +344,6 @@ struct SchedulerHandler {
     slabs: Slab<Handle>,
 }
 
-const MAX_TOKEN_NUM: usize = 102400;
-impl SchedulerHandler {
-    fn new() -> SchedulerHandler {
-        SchedulerHandler {
-            // slabs: Slab::new_starting_at(Token(1), MAX_TOKEN_NUM),
-            slabs: Slab::new(MAX_TOKEN_NUM),
-        }
-    }
-}
-
 #[cfg(any(target_os = "macos",
           target_os = "freebsd",
           target_os = "dragonfly",
@@ -382,5 +384,3 @@ impl Handler for SchedulerHandler {
 
     }
 }
-
-
