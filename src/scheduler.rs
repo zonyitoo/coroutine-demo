@@ -12,6 +12,7 @@ use std::os::unix::io::AsRawFd;
 use std::convert::From;
 use std::sync::atomic::{ATOMIC_BOOL_INIT, AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::collections::VecDeque;
 
 use coroutine::spawn;
 use coroutine::coroutine::{State, Handle, Coroutine};
@@ -58,6 +59,8 @@ pub struct Scheduler {
 
     eventloop: EventLoop<SchedulerHandler>,
     handler: SchedulerHandler,
+
+    stolen: VecDeque<Handle>,
 }
 
 impl Scheduler {
@@ -88,6 +91,8 @@ impl Scheduler {
 
             eventloop: EventLoop::new().unwrap(),
             handler: SchedulerHandler::new(),
+
+            stolen: VecDeque::new(),
         }
     }
 
@@ -156,6 +161,46 @@ impl Scheduler {
         SCHEDULER_HAS_STARTED.store(false, Ordering::SeqCst);
     }
 
+    fn resume_coroutine(&mut self, work: Handle) {
+        match work.state() {
+            State::Suspended | State::Blocked => {
+                debug!("Resuming Coroutine: {:?}", work);
+
+                if let Err(err) = work.resume() {
+                    let msg = match err.downcast_ref::<&'static str>() {
+                        Some(s) => *s,
+                        None => match err.downcast_ref::<String>() {
+                            Some(s) => &s[..],
+                            None => "Box<Any>",
+                        }
+                    };
+
+                    error!("Coroutine panicked! {:?}", msg);
+                }
+
+                match work.state() {
+                    State::Normal | State::Running => {
+                        unreachable!();
+                    },
+                    State::Suspended => {
+                        debug!("Coroutine suspended, going to be resumed next round");
+                        self.workqueue.push(work);
+                    },
+                    State::Blocked => {
+                        debug!("Coroutine blocked, maybe waiting for I/O");
+                    },
+                    State::Finished | State::Panicked => {
+                        debug!("Coroutine state: {:?}, will not be resumed automatically", work.state());
+                    }
+                }
+            },
+            _ => {
+                error!("Trying to resume coroutine {:?}, but its state is {:?}",
+                       work, work.state());
+            }
+        }
+    }
+
     fn schedule(&mut self) {
         loop {
             match self.commchannel.try_recv() {
@@ -179,67 +224,37 @@ impl Scheduler {
             let mut need_steal = true;
             // while let Some(work) = self.workqueue.pop() {
             while let Stolen::Data(work) = self.workstealer.steal() {
-                match work.state() {
-                    State::Suspended | State::Blocked => {
-                        debug!("Resuming Coroutine: {:?}", work);
-                        need_steal = false;
-
-                        if let Err(err) = work.resume() {
-                            let msg = match err.downcast_ref::<&'static str>() {
-                                Some(s) => *s,
-                                None => match err.downcast_ref::<String>() {
-                                    Some(s) => &s[..],
-                                    None => "Box<Any>",
-                                }
-                            };
-
-                            error!("Coroutine panicked! {:?}", msg);
-                        }
-
-                        match work.state() {
-                            State::Normal | State::Running => {
-                                unreachable!();
-                            },
-                            State::Suspended => {
-                                debug!("Coroutine suspended, going to be resumed next round");
-                                self.workqueue.push(work);
-                            },
-                            State::Blocked => {
-                                debug!("Coroutine blocked, maybe waiting for I/O");
-                            },
-                            State::Finished | State::Panicked => {
-                                debug!("Coroutine state: {:?}, will not be resumed automatically", work.state());
-                            }
-                        }
-                    },
-                    _ => {
-                        error!("Trying to resume coroutine {:?}, but its state is {:?}",
-                               work, work.state());
-                    }
-                }
+                need_steal = true;
+                self.resume_coroutine(work);
             }
 
             if !need_steal || !self.handler.slabs.is_empty() {
                 continue;
             }
 
-            let mut has_stolen = false;
             debug!("Trying to steal from neighbors: {:?}", thread::current().name());
             for &(_, ref st) in self.neighbors.iter() {
                 match st.steal() {
                     Stolen::Empty => {},
                     Stolen::Data(coro) => {
-                        self.workqueue.push(coro);
-                        has_stolen = true;
+                        self.stolen.push_back(coro);
                         // break;
                     },
                     Stolen::Abort => {}
                 }
             }
 
-            // if !has_stolen {
-            //     thread::sleep_ms(1000);
-            // }
+            match self.stolen.pop_front() {
+                Some(coro) => {
+                    while let Some(c) = self.stolen.pop_front() {
+                        self.workqueue.push(c);
+                    }
+                    self.resume_coroutine(coro);
+                },
+                None => {
+                    thread::sleep_ms(100);
+                }
+            }
         }
     }
 
