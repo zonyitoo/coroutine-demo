@@ -6,9 +6,11 @@ use std::sync::{Mutex, Once, ONCE_INIT};
 use std::mem;
 use std::cell::UnsafeCell;
 use std::io;
-use std::os::unix::io::{RawFd, AsRawFd};
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{ATOMIC_BOOL_INIT, AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::convert::From;
 
 use coroutine::spawn;
 use coroutine::coroutine::{State, Handle, Coroutine};
@@ -229,8 +231,9 @@ impl Scheduler {
         }
     }
 
+    #[cfg(unix)]
     pub fn wait_event<E: Evented + AsRawFd>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
-        let token = self.handler.slabs.insert((Coroutine::current(), fd.as_raw_fd())).unwrap();
+        let token = self.handler.slabs.insert((Coroutine::current(), From::from(fd.as_raw_fd()))).unwrap();
         try!(self.eventloop.register_opt(fd, token, interest,
                                          PollOpt::level()|PollOpt::oneshot()));
 
@@ -247,7 +250,7 @@ impl Scheduler {
 }
 
 struct SchedulerHandler {
-    slabs: Slab<(Handle, RawFd)>,
+    slabs: Slab<(Handle, Io)>,
 }
 
 const MAX_TOKEN_NUM: usize = 102400;
@@ -270,11 +273,11 @@ impl Handler for SchedulerHandler {
 
         match self.slabs.remove(token) {
             Some((hdl, fd)) => {
+                // FIXME: Linux EPoll needs to explicit EPOLL_CTL_DEL the fd
                 if cfg!(target_os = "linux") {
-                    let fd = Io::from_raw_fd(fd);
                     event_loop.deregister(&fd).unwrap();
-                    mem::forget(fd);
                 }
+                mem::forget(fd);
                 Scheduler::current().resume(hdl);
             },
             None => {
@@ -290,11 +293,11 @@ impl Handler for SchedulerHandler {
 
         match self.slabs.remove(token) {
             Some((hdl, fd)) => {
+                // FIXME: Linux EPoll needs to explicit EPOLL_CTL_DEL the fd
                 if cfg!(target_os = "linux") {
-                    let fd = Io::from_raw_fd(fd);
                     event_loop.deregister(&fd).unwrap();
-                    mem::forget(fd);
                 }
+                mem::forget(fd);
                 Scheduler::current().resume(hdl);
             },
             None => {
