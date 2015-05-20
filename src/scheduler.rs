@@ -6,20 +6,19 @@ use std::sync::{Mutex, Once, ONCE_INIT};
 use std::mem;
 use std::cell::UnsafeCell;
 use std::io;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::os::unix::io::AsRawFd;
-#[cfg(windows)]
-use std::os::windows::io::{AsRawHandle, AsRawSocket};
+#[cfg(target_os = "linux")]
+use std::convert::From;
 use std::sync::atomic::{ATOMIC_BOOL_INIT, AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::convert::From;
 
 use coroutine::spawn;
 use coroutine::coroutine::{State, Handle, Coroutine};
 
 use deque::{BufferPool, Stealer, Worker, Stolen};
 
-use mio::{EventLoop, Io, Evented, Handler, Token, ReadHint, Interest, PollOpt};
+use mio::{EventLoop, Evented, Handler, Token, ReadHint, Interest, PollOpt};
 use mio::util::Slab;
 
 static mut THREAD_HANDLES: *const Mutex<Vec<(Sender<SchedMessage>, Stealer<Handle>)>> =
@@ -238,21 +237,10 @@ impl Scheduler {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "linux",
+          target_os = "android"))]
 impl Scheduler {
-    pub fn wait_socket_event<E: Evented + AsRawFd>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
-        let token = self.handler.slabs.insert((Coroutine::current(), From::from(fd.as_raw_fd()))).unwrap();
-        try!(self.eventloop.register_opt(fd, token, interest,
-                                         PollOpt::level()|PollOpt::oneshot()));
-
-        debug!("wait_event: Blocked current Coroutine ...; token={:?}", token);
-        Coroutine::block();
-        debug!("wait_event: Waked up; token={:?}", token);
-
-        Ok(())
-    }
-
-    pub fn wait_file_event<E: Evented + AsRawFd>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
+    pub fn wait_event<E: Evented + AsRawFd>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
         let token = self.handler.slabs.insert((Coroutine::current(), From::from(fd.as_raw_fd()))).unwrap();
         try!(self.eventloop.register_opt(fd, token, interest,
                                          PollOpt::level()|PollOpt::oneshot()));
@@ -265,48 +253,14 @@ impl Scheduler {
     }
 }
 
-// #[cfg(windows)]
-// impl Scheduler {
-//     pub fn wait_socket_event<E: Evented + AsRawSocket>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
-//         let token = self.handler.slabs.insert((Coroutine::current(), From::from(fd.as_raw_socket()))).unwrap();
-//         try!(self.eventloop.register_opt(fd, token, interest,
-//                                          PollOpt::level()|PollOpt::oneshot()));
-
-//         debug!("wait_event: Blocked current Coroutine ...; token={:?}", token);
-//         Coroutine::block();
-//         debug!("wait_event: Waked up; token={:?}", token);
-
-//         Ok(())
-//     }
-
-//     pub fn wait_file_event<E: Evented + AsRawHandle>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
-//         let token = self.handler.slabs.insert((Coroutine::current(), From::from(fd.as_raw_handle()))).unwrap();
-//         try!(self.eventloop.register_opt(fd, token, interest,
-//                                          PollOpt::level()|PollOpt::oneshot()));
-
-//         debug!("wait_event: Blocked current Coroutine ...; token={:?}", token);
-//         Coroutine::block();
-//         debug!("wait_event: Waked up; token={:?}", token);
-
-//         Ok(())
-//     }
-// }
-
-
+#[cfg(any(target_os = "linux",
+          target_os = "android"))]
 struct SchedulerHandler {
     slabs: Slab<(Handle, Io)>,
 }
 
-const MAX_TOKEN_NUM: usize = 102400;
-impl SchedulerHandler {
-    fn new() -> SchedulerHandler {
-        SchedulerHandler {
-            // slabs: Slab::new_starting_at(Token(1), MAX_TOKEN_NUM),
-            slabs: Slab::new(MAX_TOKEN_NUM),
-        }
-    }
-}
-
+#[cfg(any(target_os = "linux",
+          target_os = "android"))]
 impl Handler for SchedulerHandler {
     type Timeout = ();
     type Message = ();
@@ -317,10 +271,8 @@ impl Handler for SchedulerHandler {
 
         match self.slabs.remove(token) {
             Some((hdl, fd)) => {
-                // FIXME: Linux EPoll needs to explicit EPOLL_CTL_DEL the fd
-                if cfg!(target_os = "linux") {
-                    event_loop.deregister(&fd).unwrap();
-                }
+                // Linux EPoll needs to explicit EPOLL_CTL_DEL the fd
+                event_loop.deregister(&fd).unwrap();
                 mem::forget(fd);
                 Scheduler::current().resume(hdl);
             },
@@ -337,11 +289,90 @@ impl Handler for SchedulerHandler {
 
         match self.slabs.remove(token) {
             Some((hdl, fd)) => {
-                // FIXME: Linux EPoll needs to explicit EPOLL_CTL_DEL the fd
-                if cfg!(target_os = "linux") {
-                    event_loop.deregister(&fd).unwrap();
-                }
+                // Linux EPoll needs to explicit EPOLL_CTL_DEL the fd
+                event_loop.deregister(&fd).unwrap();
                 mem::forget(fd);
+                Scheduler::current().resume(hdl);
+            },
+            None => {
+                warn!("No coroutine is waiting on readable {:?}", token);
+            }
+        }
+
+    }
+}
+
+#[cfg(any(target_os = "macos",
+          target_os = "freebsd",
+          target_os = "dragonfly",
+          target_os = "ios",
+          target_os = "bitrig",
+          target_os = "openbsd"))]
+impl Scheduler {
+    pub fn wait_event<E: Evented>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
+        let token = self.handler.slabs.insert(Coroutine::current()).unwrap();
+        try!(self.eventloop.register_opt(fd, token, interest,
+                                         PollOpt::level()|PollOpt::oneshot()));
+
+        debug!("wait_event: Blocked current Coroutine ...; token={:?}", token);
+        Coroutine::block();
+        debug!("wait_event: Waked up; token={:?}", token);
+
+        Ok(())
+    }
+}
+
+#[cfg(any(target_os = "macos",
+          target_os = "freebsd",
+          target_os = "dragonfly",
+          target_os = "ios",
+          target_os = "bitrig",
+          target_os = "openbsd"))]
+struct SchedulerHandler {
+    slabs: Slab<Handle>,
+}
+
+const MAX_TOKEN_NUM: usize = 102400;
+impl SchedulerHandler {
+    fn new() -> SchedulerHandler {
+        SchedulerHandler {
+            // slabs: Slab::new_starting_at(Token(1), MAX_TOKEN_NUM),
+            slabs: Slab::new(MAX_TOKEN_NUM),
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos",
+          target_os = "freebsd",
+          target_os = "dragonfly",
+          target_os = "ios",
+          target_os = "bitrig",
+          target_os = "openbsd"))]
+impl Handler for SchedulerHandler {
+    type Timeout = ();
+    type Message = ();
+
+    fn writable(&mut self, _: &mut EventLoop<Self>, token: Token) {
+
+        debug!("In writable, token {:?}", token);
+
+        match self.slabs.remove(token) {
+            Some(hdl) => {
+                Scheduler::current().resume(hdl);
+            },
+            None => {
+                warn!("No coroutine is waiting on writable {:?}", token);
+            }
+        }
+
+    }
+
+    fn readable(&mut self, _: &mut EventLoop<Self>, token: Token, hint: ReadHint) {
+
+        debug!("In readable, token {:?}, hint {:?}", token, hint);
+
+        match self.slabs.remove(token) {
+            Some(hdl) => {
                 Scheduler::current().resume(hdl);
             },
             None => {
