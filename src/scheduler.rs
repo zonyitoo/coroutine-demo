@@ -170,7 +170,9 @@ impl Scheduler {
                 _ => panic!("Receiving from channel: Unknown message")
             }
 
-            self.eventloop.run_once(&mut self.handler).unwrap();
+            if !self.handler.slabs.is_empty() {
+                self.eventloop.run_once(&mut self.handler).unwrap();
+            }
 
             debug!("Trying to resume all ready coroutines: {:?}", thread::current().name());
             // Run all ready coroutines
@@ -217,22 +219,27 @@ impl Scheduler {
                 }
             }
 
-            if !need_steal {
+            if !need_steal || !self.handler.slabs.is_empty() {
                 continue;
             }
 
+            let mut has_stolen = false;
             debug!("Trying to steal from neighbors: {:?}", thread::current().name());
             for &(_, ref st) in self.neighbors.iter() {
                 match st.steal() {
                     Stolen::Empty => {},
                     Stolen::Data(coro) => {
                         self.workqueue.push(coro);
-
+                        has_stolen = true;
                         // break;
                     },
                     Stolen::Abort => {}
                 }
             }
+
+            // if !has_stolen {
+            //     thread::sleep_ms(1000);
+            // }
         }
     }
 
