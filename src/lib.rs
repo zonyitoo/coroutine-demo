@@ -1,4 +1,4 @@
-#![feature(libc, std_misc)]
+#![feature(libc, std_misc, ip_addr)]
 
 extern crate coroutine;
 extern crate num_cpus;

@@ -70,7 +70,7 @@ fn main() {
 
                 debug!("version {:?}, subject: ({:?}, {:?}), {:?}", version, method, uri, headers);
 
-                let message = b"<html><head></head><body>Hello World</body></html>\n";
+                let message = b"<html><body><h1>It works!</h1></body></html>\n";
                 let mut headers = Headers::new();
                 headers.set_raw("Content-Type", vec![b"text/html".to_vec()]);
 
