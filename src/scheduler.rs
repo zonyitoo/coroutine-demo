@@ -12,7 +12,7 @@ use std::os::unix::io::AsRawFd;
 use std::convert::From;
 use std::sync::atomic::{ATOMIC_BOOL_INIT, AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::collections::VecDeque;
+// use std::collections::VecDeque;
 
 use coroutine::spawn;
 use coroutine::coroutine::{State, Handle, Coroutine};
@@ -60,7 +60,7 @@ pub struct Scheduler {
     eventloop: EventLoop<SchedulerHandler>,
     handler: SchedulerHandler,
 
-    stolen: VecDeque<Handle>,
+    // stolen: VecDeque<Handle>,
 }
 
 impl Scheduler {
@@ -92,7 +92,7 @@ impl Scheduler {
             eventloop: EventLoop::new().unwrap(),
             handler: SchedulerHandler::new(),
 
-            stolen: VecDeque::new(),
+            // stolen: VecDeque::new(),
         }
     }
 
@@ -233,28 +233,35 @@ impl Scheduler {
             }
 
             debug!("Trying to steal from neighbors: {:?}", thread::current().name());
+            let mut stolen = None;
             for &(_, ref st) in self.neighbors.iter() {
                 match st.steal() {
                     Stolen::Empty => {},
                     Stolen::Data(coro) => {
-                        self.stolen.push_back(coro);
-                        // break;
+                        stolen = Some(coro);
+                        // self.stolen.push_back(coro);
+                        break;
                     },
                     Stolen::Abort => {}
                 }
             }
 
-            match self.stolen.pop_front() {
-                Some(coro) => {
-                    while let Some(c) = self.stolen.pop_front() {
-                        self.workqueue.push(c);
-                    }
-                    self.resume_coroutine(coro);
-                },
-                None => {
-                    thread::sleep_ms(100);
-                }
+            match stolen {
+                Some(coro) => self.resume_coroutine(coro),
+                None => thread::sleep_ms(2000),
             }
+
+            // match self.stolen.pop_front() {
+            //     Some(coro) => {
+            //         while let Some(c) = self.stolen.pop_front() {
+            //             self.workqueue.push(c);
+            //         }
+            //         self.resume_coroutine(coro);
+            //     },
+            //     None => {
+            //         thread::sleep_ms(100);
+            //     }
+            // }
         }
     }
 
