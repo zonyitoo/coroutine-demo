@@ -20,7 +20,7 @@ fn main() {
             .author("Y. T. Chung <zonyitoo@gmail.com>")
             .arg(Arg::with_name("BIND").short("b").long("bind").takes_value(true).required(true)
                     .help("Listening on this address"))
-            .arg(Arg::with_name("THREADS").short("t").long("threads").takes_value(true).required(true)
+            .arg(Arg::with_name("THREADS").short("t").long("threads").takes_value(true)
                     .help("Number of threads"))
             .get_matches();
 
@@ -66,5 +66,5 @@ fn main() {
                 info!("{:?} closed", stream.peer_addr().unwrap());
             });
         }
-    }, matches.value_of("THREADS").unwrap().parse().unwrap());
+    }, matches.value_of("THREADS").unwrap_or("1").parse().unwrap());
 }
