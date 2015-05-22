@@ -18,6 +18,10 @@ path = "src/bin/httpechoserver.rs"
 name = "autoexit"
 path = "src/bin/test_autoexit.rs"
 
+[[bin]]
+name = "udpechoserver"
+path = "src/bin/udpechoserver.rs"
+
 [dependencies]
 coroutine = "*"
 num_cpus = "*"
