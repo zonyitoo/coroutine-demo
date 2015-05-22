@@ -12,7 +12,7 @@ use std::os::unix::io::AsRawFd;
 use std::convert::From;
 use std::sync::atomic::{ATOMIC_BOOL_INIT, AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-// use std::collections::VecDeque;
+use std::collections::VecDeque;
 
 use coroutine::spawn;
 use coroutine::coroutine::{State, Handle, Coroutine};
@@ -49,6 +49,8 @@ pub enum SchedMessage {
     Shutdown,
 }
 
+const MAX_PRIVATE_WORK_NUM: usize = 4;
+
 pub struct Scheduler {
     workqueue: Worker<Handle>,
     workstealer: Stealer<Handle>,
@@ -60,7 +62,7 @@ pub struct Scheduler {
     eventloop: EventLoop<SchedulerHandler>,
     handler: SchedulerHandler,
 
-    // stolen: VecDeque<Handle>,
+    private_work: VecDeque<Handle>,
 }
 
 impl Scheduler {
@@ -92,7 +94,7 @@ impl Scheduler {
             eventloop: EventLoop::new().unwrap(),
             handler: SchedulerHandler::new(),
 
-            // stolen: VecDeque::new(),
+            private_work: VecDeque::new(),
         }
     }
 
@@ -108,9 +110,17 @@ impl Scheduler {
         let coro = spawn(f);
 
         let sc = Scheduler::current();
+        sc.ready(coro);
 
-        sc.workqueue.push(coro);
         Coroutine::sched();
+    }
+
+    pub fn ready(&mut self, work: Handle) {
+        if self.private_work.len() >= MAX_PRIVATE_WORK_NUM {
+            self.workqueue.push(work);
+        } else {
+            self.private_work.push_back(work);
+        }
     }
 
     pub fn run<F>(f: F, threads: usize)
@@ -184,7 +194,7 @@ impl Scheduler {
                     },
                     State::Suspended => {
                         debug!("Coroutine suspended, going to be resumed next round");
-                        self.workqueue.push(work);
+                        self.ready(work);
                     },
                     State::Blocked => {
                         debug!("Coroutine blocked, maybe waiting for I/O");
@@ -223,9 +233,21 @@ impl Scheduler {
             // Run all ready coroutines
             let mut need_steal = true;
             // while let Some(work) = self.workqueue.pop() {
-            while let Stolen::Data(work) = self.workstealer.steal() {
-                need_steal = true;
+            // while let Stolen::Data(work) = self.workstealer.steal() {
+            //     need_steal = false;
+            //     self.resume_coroutine(work);
+            // }
+
+            while let Some(work) = self.private_work.pop_front() {
+                need_steal = false;
                 self.resume_coroutine(work);
+            }
+
+            if need_steal {
+                if let Stolen::Data(work) = self.workstealer.steal() {
+                    need_steal = false;
+                    self.resume_coroutine(work);
+                }
             }
 
             if !need_steal || !self.handler.slabs.is_empty() {
@@ -233,35 +255,36 @@ impl Scheduler {
             }
 
             debug!("Trying to steal from neighbors: {:?}", thread::current().name());
-            let mut stolen = None;
-            for &(_, ref st) in self.neighbors.iter() {
-                match st.steal() {
-                    Stolen::Empty => {},
-                    Stolen::Data(coro) => {
-                        stolen = Some(coro);
-                        // self.stolen.push_back(coro);
-                        break;
-                    },
-                    Stolen::Abort => {}
-                }
-            }
 
-            match stolen {
-                Some(coro) => self.resume_coroutine(coro),
-                None => thread::sleep_ms(2000),
-            }
+            // if self.neighbors.len() > 0 {
+            //     let neighbor_idx = ::rand::random::<usize>() % self.neighbors.len();
+            //     let stolen = {
+            //         let &(_, ref neighbor_stealer) = &self.neighbors[neighbor_idx];
+            //         neighbor_stealer.steal()
+            //     };
 
-            // match self.stolen.pop_front() {
-            //     Some(coro) => {
-            //         while let Some(c) = self.stolen.pop_front() {
-            //             self.workqueue.push(c);
-            //         }
+            //     if let Stolen::Data(coro) = stolen {
             //         self.resume_coroutine(coro);
-            //     },
-            //     None => {
-            //         thread::sleep_ms(100);
+            //         continue;
             //     }
             // }
+            let mut has_stolen = false;
+            let stolen_works = self.neighbors.iter()
+                    .filter_map(|&(_, ref st)|
+                        if let Stolen::Data(w) = st.steal() {
+                            Some(w)
+                        } else {
+                            None
+                        })
+                    .collect::<Vec<Handle>>();
+            for work in stolen_works.into_iter() {
+                has_stolen = true;
+                self.resume_coroutine(work);
+            }
+
+            if !has_stolen {
+                thread::sleep_ms(100);
+            }
         }
     }
 
