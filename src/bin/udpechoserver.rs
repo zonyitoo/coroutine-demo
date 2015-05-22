@@ -5,8 +5,6 @@ extern crate mio;
 
 extern crate cosupport;
 
-use std::net::SocketAddr;
-
 use clap::{Arg, App};
 
 use mio::buf::RingBuf;
