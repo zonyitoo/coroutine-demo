@@ -7,11 +7,11 @@ authors = ["Y. T. Chung <zonyitoo@gmail.com>"]
 name = "cosupport"
 
 [[bin]]
-name = "echoserver"
+name = "tcp-echo"
 path = "src/bin/echoserver.rs"
 
 [[bin]]
-name = "httpechoserver"
+name = "http-echo"
 path = "src/bin/httpechoserver.rs"
 
 [[bin]]
@@ -19,7 +19,7 @@ name = "autoexit"
 path = "src/bin/test_autoexit.rs"
 
 [[bin]]
-name = "udpechoserver"
+name = "udp-echo"
 path = "src/bin/udpechoserver.rs"
 
 [dependencies]

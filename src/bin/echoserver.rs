@@ -15,7 +15,7 @@ use cosupport::net::tcp::TcpSocket;
 fn main() {
     env_logger::init().unwrap();
 
-    let matches = App::new("coroutine-demo")
+    let matches = App::new("tcp-echo")
             .version(env!("CARGO_PKG_VERSION"))
             .author("Y. T. Chung <zonyitoo@gmail.com>")
             .arg(Arg::with_name("BIND").short("b").long("bind").takes_value(true).required(true)
