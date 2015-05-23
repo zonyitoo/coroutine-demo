@@ -49,7 +49,7 @@ pub enum SchedMessage {
     Shutdown,
 }
 
-const MAX_PRIVATE_WORK_NUM: usize = 4;
+const MAX_PRIVATE_WORK_NUM: usize = 10;
 
 pub struct Scheduler {
     workqueue: Worker<Handle>,
@@ -288,9 +288,9 @@ impl Scheduler {
         }
     }
 
-    fn resume(&mut self, handle: Handle) {
-        self.workqueue.push(handle);
-    }
+    // fn resume(&mut self, handle: Handle) {
+    //     self.workqueue.push(handle);
+    // }
 }
 
 const MAX_TOKEN_NUM: usize = 102400;
@@ -340,7 +340,7 @@ impl Handler for SchedulerHandler {
                 // Linux EPoll needs to explicit EPOLL_CTL_DEL the fd
                 event_loop.deregister(&fd).unwrap();
                 mem::forget(fd);
-                Scheduler::current().resume(hdl);
+                Scheduler::current().ready(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on writable {:?}", token);
@@ -358,7 +358,7 @@ impl Handler for SchedulerHandler {
                 // Linux EPoll needs to explicit EPOLL_CTL_DEL the fd
                 event_loop.deregister(&fd).unwrap();
                 mem::forget(fd);
-                Scheduler::current().resume(hdl);
+                Scheduler::current().ready(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on readable {:?}", token);
@@ -414,7 +414,7 @@ impl Handler for SchedulerHandler {
 
         match self.slabs.remove(token) {
             Some(hdl) => {
-                Scheduler::current().resume(hdl);
+                Scheduler::current().ready(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on writable {:?}", token);
@@ -429,7 +429,7 @@ impl Handler for SchedulerHandler {
 
         match self.slabs.remove(token) {
             Some(hdl) => {
-                Scheduler::current().resume(hdl);
+                Scheduler::current().ready(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on readable {:?}", token);

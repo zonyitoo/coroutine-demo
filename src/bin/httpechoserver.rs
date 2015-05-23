@@ -15,7 +15,7 @@ use std::fmt;
 
 use clap::{Arg, App};
 
-use hyper::http::{self, parse_request, Incoming};
+use hyper::http;
 use hyper::buffer::BufReader;
 use hyper::server::{Request, Response, Handler};
 use hyper::header::{Connection, Headers, Expect};
@@ -26,7 +26,7 @@ use hyper::uri::RequestUri::AbsolutePath;
 use hyper::error::Error;
 use hyper::method::Method;
 
-use openssl::ssl::{Ssl, SslStream, SslContext, SSL_VERIFY_NONE};
+use openssl::ssl::{SslStream, SslContext, SSL_VERIFY_NONE};
 use openssl::ssl::SslMethod::Sslv23;
 use openssl::ssl::error::StreamError as SslIoError;
 use openssl::x509::X509FileType;
