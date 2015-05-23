@@ -1,5 +1,5 @@
 use std::io;
-use std::net::SocketAddr;
+use std::net::{ToSocketAddrs, SocketAddr};
 use std::ops::{Deref, DerefMut};
 
 use mio::{self, Interest};
@@ -20,9 +20,16 @@ impl TcpSocket {
         Ok(TcpSocket(try!(::mio::tcp::TcpSocket::v6())))
     }
 
-    pub fn connect(self, addr: &SocketAddr) -> io::Result<(TcpStream, bool)> {
-        let (stream, complete) = try!(self.0.connect(addr));
-        Ok((TcpStream(stream), complete))
+    pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<(TcpStream, bool)> {
+        // let (stream, complete) = try!(self.0.connect(addr));
+        // Ok((TcpStream(stream), complete))
+
+        super::each_addr(addr, |a| {
+            match a {
+                &SocketAddr::V4(..) => try!(TcpSocket::v4()).0.connect(a),
+                &SocketAddr::V6(..) => try!(TcpSocket::v6()).0.connect(a),
+            }
+        }).map(|(stream, complete)| (TcpStream(stream), complete))
     }
 
     pub fn listen(self, backlog: usize) -> io::Result<TcpListener> {
@@ -47,10 +54,11 @@ impl DerefMut for TcpSocket {
 pub struct TcpListener(::mio::tcp::TcpListener);
 
 impl TcpListener {
-    pub fn bind(addr: &SocketAddr) -> io::Result<TcpListener> {
-        let listener = try!(::mio::tcp::TcpListener::bind(addr));
+    pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListener> {
+        // let listener = try!(::mio::tcp::TcpListener::bind(addr));
 
-        Ok(TcpListener(listener))
+        // Ok(TcpListener(listener))
+        super::each_addr(addr, ::mio::tcp::TcpListener::bind).map(TcpListener)
     }
 
     pub fn accept(&self) -> io::Result<TcpStream> {
@@ -80,6 +88,10 @@ impl TcpListener {
             }
         }
     }
+
+    pub fn try_clone(&self) -> io::Result<TcpListener> {
+        Ok(TcpListener(try!(self.0.try_clone())))
+    }
 }
 
 impl Deref for TcpListener {
@@ -99,10 +111,11 @@ impl DerefMut for TcpListener {
 pub struct TcpStream(mio::tcp::TcpStream);
 
 impl TcpStream {
-    pub fn connect(addr: &SocketAddr) -> io::Result<TcpStream> {
-        let stream = try!(mio::tcp::TcpStream::connect(addr));
+    pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
+        // let stream = try!(mio::tcp::TcpStream::connect(addr));
 
-        Ok(TcpStream(stream))
+        // Ok(TcpStream(stream))
+        super::each_addr(addr, ::mio::tcp::TcpStream::connect).map(TcpStream)
     }
 
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {

@@ -32,6 +32,7 @@ env_logger = "*"
 clap = "*"
 hyper = "*"
 rand = "*"
+openssl = "*"
 
 #[dependencies.deque]
 #path = "/Users/zonyitoo/Projects/deque"
