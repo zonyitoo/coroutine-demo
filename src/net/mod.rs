@@ -5,6 +5,21 @@ pub use self::udp::UdpSocket;
 use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
 
+macro_rules! try_wouldblock(
+    ($e:expr) => {{
+        match $e {
+            Ok(None) => (),
+            Ok(Some(s)) => {
+                return Ok(s);
+            },
+            Err(e) => {
+                error!("try_nonblock: {}", e);
+                return Err(e);
+            }
+        }
+    }};
+);
+
 pub mod tcp;
 pub mod udp;
 

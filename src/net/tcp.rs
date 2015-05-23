@@ -64,7 +64,7 @@ impl TcpListener {
     pub fn accept(&self) -> io::Result<TcpStream> {
         match self.0.accept() {
             Ok(None) => {
-                debug!("accept WOULDBLOCK; going to register into eventloop");
+                debug!("accept WouldBlock; going to register into eventloop");
             },
             Ok(Some(stream)) => {
                 return Ok(TcpStream(stream));
@@ -78,7 +78,7 @@ impl TcpListener {
 
         match self.0.accept() {
             Ok(None) => {
-                panic!("accept WOULDBLOCK");
+                panic!("accept WouldBlock; Coroutine was awaked by readable event");
             },
             Ok(Some(stream)) => {
                 Ok(TcpStream(stream))
@@ -142,11 +142,11 @@ impl io::Read for TcpStream {
         while buf.has_remaining() {
             match self.0.read(&mut buf) {
                 Ok(None) => {
-                    debug!("TcpStream read WOULDBLOCK");
+                    debug!("TcpStream read WouldBlock");
                     break;
                 },
                 Ok(Some(0)) => {
-                    debug!("TcpStream read 0 bytes");
+                    debug!("TcpStream read 0 bytes; may be EOF");
                     return Ok(total_len);
                 },
                 Ok(Some(len)) => {
@@ -171,11 +171,11 @@ impl io::Read for TcpStream {
         while buf.has_remaining() {
             match self.0.read(&mut buf) {
                 Ok(None) => {
-                    debug!("TcpStream read WOULDBLOCK");
+                    debug!("TcpStream read WouldBlock");
                     break;
                 },
                 Ok(Some(0)) => {
-                    debug!("TcpStream read 0 bytes");
+                    debug!("TcpStream read 0 bytes; may be EOF");
                     break;
                 },
                 Ok(Some(len)) => {
@@ -202,11 +202,11 @@ impl io::Write for TcpStream {
         while buf.has_remaining() {
             match self.0.write(&mut buf) {
                 Ok(None) => {
-                    debug!("TcpStream write WOULDBLOCK");
+                    debug!("TcpStream write WouldBlock");
                     break;
                 },
                 Ok(Some(0)) => {
-                    debug!("TcpStream write 0 bytes");
+                    debug!("TcpStream write 0 bytes; may be EOF");
                     return Ok(total_len);
                 },
                 Ok(Some(len)) => {
@@ -231,11 +231,11 @@ impl io::Write for TcpStream {
         while buf.has_remaining() {
             match self.0.write(&mut buf) {
                 Ok(None) => {
-                    debug!("TcpStream write WOULDBLOCK");
+                    debug!("TcpStream write WouldBlock");
                     break;
                 },
                 Ok(Some(0)) => {
-                    debug!("TcpStream write 0 bytes");
+                    debug!("TcpStream write 0 bytes; may be EOF");
                     break;
                 },
                 Ok(Some(len)) => {
