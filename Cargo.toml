@@ -23,7 +23,7 @@ name = "udp-echo"
 path = "src/bin/udpechoserver.rs"
 
 [dependencies]
-coroutine = "*"
+#coroutine = "*"
 num_cpus = "*"
 deque = "*"
 log = "*"
@@ -41,3 +41,7 @@ openssl = "*"
 git = "https://github.com/carllerche/mio.git"
 #path = "/Users/zonyitoo/Projects/mio"
 #git = "https://github.com/zonyitoo/mio.git"
+
+[dependencies.coroutine]
+git = "https://github.com/rustcc/coroutine-rs.git"
+rev = "b17d2a061a763a43f034a5c491387fc1dd5fd2cf"
