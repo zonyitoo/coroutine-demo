@@ -33,6 +33,7 @@ clap = "*"
 hyper = "*"
 rand = "*"
 openssl = "*"
+lazy_static = "*"
 
 #[dependencies.deque]
 #path = "/Users/zonyitoo/Projects/deque"
