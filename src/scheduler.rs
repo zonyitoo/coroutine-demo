@@ -41,6 +41,9 @@ lazy_static! {
 
 struct Scheduler {
     global_queue: VecDeque<Handle>,
+
+    // TODO: How to store processors??
+    // std::sync::Weak?
 }
 
 impl Scheduler {
@@ -111,7 +114,7 @@ impl Scheduler {
         }
 
         // 2. Steal some for him
-        // Steal works from the most buy processors
+        // Steal works from the most busy processors
 
         // 3. Exile
         // Record it as a starved processor or exit
