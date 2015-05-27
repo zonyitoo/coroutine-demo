@@ -63,15 +63,23 @@ impl Scheduler {
             }
         };
 
+        // TODO: Determine whether we should create a new processor
+        // If the total number of processors has not exceeded MAX_PROC, then we may create a new processor.
+        // One possible strategy is to decide a `work_load`, try to create a new processor
+        // if `work_load` have exceeded 30%.
+        //
+        // But, should we kill some of the starving processors?
+
         // 1. Try to find a starved processor
 
-        // 2. Try to run it by my self
+        // 2. Try to run it by myself
         let hdl = match Processor::current().feed_one(hdl) {
             Some(hdl) => {
                 debug!("Current processor refused the Coroutine");
                 hdl
             },
             None => {
+                // Ok!
                 return;
             }
         };
@@ -82,11 +90,11 @@ impl Scheduler {
 }
 
 impl Scheduler {
-    pub fn processor_exit() {
-
+    pub fn processor_exit(processor: &mut Processor) {
+        // TODO: Processor exited, cleanup
     }
 
-    pub fn processor_starving() {
+    pub fn processor_starving(processor: &mut Processor) {
         let scheduler = match Scheduler::get().lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
@@ -97,18 +105,30 @@ impl Scheduler {
 
         // 1. Feed him with global queue
         if !scheduler.global_queue.is_empty() {
-
+            let ret = processor.feed(scheduler.global_queue.into_iter());
+            assert!(ret);
+            return;
         }
 
-        // 2. Exile
+        // 2. Steal some for him
+        // Steal works from the most buy processors
+
+        // 3. Exile
+        // Record it as a starved processor or exit
     }
 
-    pub fn processor_blocked() {
-
+    pub fn processor_create() {
+        // TODO: If the number of current working processors has not exceeded MAX_PROC
+        //       Then we could create a new processor
     }
 
-    pub fn processor_unblocked() {
+    pub fn processor_blocked(processor: &mut Processor) {
+        // TODO: Takes all works from the processor
+        //       Record it as a blocked processor
+    }
 
+    pub fn processor_unblocked(processor: &mut Processor) {
+        // TODO: Remove it from the blocked processors
     }
 }
 

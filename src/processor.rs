@@ -103,6 +103,17 @@ impl Processor {
         true
     }
 
+    pub fn work_count(&self) -> usize {
+        let guard = match self.work_queue.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                warn!("Work queue mutex is poisoned; thread {:?}", thread::current());
+                poisoned.into_inner()
+            }
+        };
+        guard.len()
+    }
+
     pub fn run(&mut self) {
         struct RunGuard<'a>(&'a mut Processor);
 
