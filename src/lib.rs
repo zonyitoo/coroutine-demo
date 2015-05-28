@@ -19,7 +19,7 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#![feature(libc, std_misc)]
+#![feature(libc, std_misc, alloc, collections, core, scoped)]
 
 extern crate coroutine;
 extern crate num_cpus;
@@ -30,7 +30,9 @@ extern crate mio;
 extern crate libc;
 extern crate rand;
 #[macro_use] extern crate lazy_static;
+extern crate uuid;
 
 pub mod scheduler;
-pub mod net;
+// pub mod net;
 pub mod processor;
+// pub mod eventloop;

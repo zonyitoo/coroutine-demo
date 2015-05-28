@@ -6,21 +6,25 @@ authors = ["Y. T. Chung <zonyitoo@gmail.com>"]
 [lib]
 name = "cosupport"
 
-[[bin]]
-name = "tcp-echo"
-path = "src/bin/echoserver.rs"
+#[[bin]]
+#name = "tcp-echo"
+#path = "src/bin/echoserver.rs"
+
+#[[bin]]
+#name = "http-echo"
+#path = "src/bin/httpechoserver.rs"
+
+#[[bin]]
+#name = "autoexit"
+#path = "src/bin/test_autoexit.rs"
+
+#[[bin]]
+#name = "udp-echo"
+#path = "src/bin/udpechoserver.rs"
 
 [[bin]]
-name = "http-echo"
-path = "src/bin/httpechoserver.rs"
-
-[[bin]]
-name = "autoexit"
-path = "src/bin/test_autoexit.rs"
-
-[[bin]]
-name = "udp-echo"
-path = "src/bin/udpechoserver.rs"
+name = "simple"
+path = "src/bin/simple.rs"
 
 [dependencies]
 #coroutine = "*"
@@ -34,6 +38,7 @@ hyper = "*"
 rand = "*"
 openssl = "*"
 lazy_static = "*"
+uuid = "*"
 
 #[dependencies.deque]
 #path = "/Users/zonyitoo/Projects/deque"
