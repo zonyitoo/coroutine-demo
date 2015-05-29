@@ -19,16 +19,25 @@ fn main() {
             .author("Y. T. Chung <zonyitoo@gmail.com>")
             .arg(Arg::with_name("THREADS").short("t").long("threads").takes_value(true)
                     .help("Number of threads"))
+            .arg(Arg::with_name("TOSLEEP").short("s").long("to-sleep").takes_value(false)
+                    .help("Sleep the thread after printing"))
             .get_matches();
 
 
     const ALPHABETS: &'static str = "ABCDEFGHIJKLMN";
 
+    let to_sleep = match matches.value_of("TOSLEEP") {
+        Some(..) => true,
+        None => false,
+    };
+
     for c in ALPHABETS.chars() {
         Scheduler::spawn(move|| {
             loop {
                 println!("{} {:?}", c, thread::current());
-                thread::sleep_ms(100);
+                if to_sleep {
+                    thread::sleep_ms(100);
+                }
                 Coroutine::sched();
             }
         });

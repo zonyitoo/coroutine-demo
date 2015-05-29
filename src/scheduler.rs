@@ -163,6 +163,7 @@ impl Scheduler {
         debug!("Processor {} is starving; thread {:?}", processor.id(), thread::current());
 
         // 1. Feed him with global queue
+        debug!("Trying to feed {} with global queue", processor.id());
         if !self.global_queue.is_empty() {
             debug!("Feed {} with global queue; count={}", processor.id(), self.global_queue.len());
             let ret = processor.feed(self.global_queue.drain());
@@ -189,6 +190,7 @@ impl Scheduler {
 
         // 2. Steal some for him
         // Steal works from the most busy processors
+        debug!("Trying to steal for {}", processor.id());
         {
             let busy_proc = self.working_processors.iter()
                     .filter_map(|(id, weakp)| {
@@ -206,6 +208,7 @@ impl Scheduler {
                     .max_by(|&(_, _, len)| len);
             match busy_proc {
                 Some((id, p, len)) => {
+                    debug!("May steal {} works from {} for {}", len, id, processor.id());
                     if len >= BUSY_THRESHOLD {
                         let mut queue = p.work_queue().lock().unwrap();
                         let steal_length = queue.len() / 2;
@@ -227,6 +230,7 @@ impl Scheduler {
 
         // 3. Exile
         // Record it as a starved processor or exit
+        debug!("Processor {} is going to be exiled", processor.id());
         {
             let procid = processor.id().clone();
             self.working_processors.remove(&procid);

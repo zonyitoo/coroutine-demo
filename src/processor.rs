@@ -116,8 +116,10 @@ impl<T> WorkDeque<T> {
     }
 
     pub fn append(&self, other: &mut VecDeque<T>) {
-        let mut guard = self.work_queue.lock().unwrap();
-        guard.append(other);
+        {
+            let mut guard = self.work_queue.lock().unwrap();
+            guard.append(other);
+        }
         self.condvar.notify_one();
     }
 
@@ -239,6 +241,7 @@ impl Processor {
                             State::Suspended => {
                                 let mut queue = self.work_queue.work_queue().lock().unwrap();
                                 if queue.len() >= scheduler::BUSY_THRESHOLD {
+                                    drop(queue); // Fuck! Dead lock!!
                                     Scheduler::give(coro);
                                 } else {
                                     queue.push_back(coro);
