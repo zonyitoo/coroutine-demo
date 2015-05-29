@@ -33,6 +33,6 @@ extern crate rand;
 extern crate uuid;
 
 pub mod scheduler;
-// pub mod net;
+pub mod net;
 pub mod processor;
 pub mod eventloop;

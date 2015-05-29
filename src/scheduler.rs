@@ -22,13 +22,18 @@
 use std::thread;
 use std::sync::{Arc, Mutex, Weak, Barrier};
 use std::collections::{HashMap, VecDeque};
+use std::sync::mpsc::Sender;
+use std::os::unix::io::{AsRawFd, RawFd};
 
 use coroutine::spawn;
 use coroutine::coroutine::{Handle, Coroutine, Options};
 
 use uuid::Uuid;
 
+use mio::Interest;
+
 use processor::{WorkDeque, Processor};
+use eventloop::EventLoop;
 
 lazy_static! {
     static ref SCHEDULER: Mutex<Scheduler> = Mutex::new(Scheduler::new());
@@ -44,6 +49,9 @@ pub struct Scheduler {
     starved_processors: VecDeque<(Uuid, Weak<WorkDeque<Handle>>)>,
     working_processors: HashMap<Uuid, Weak<WorkDeque<Handle>>>,
     blocked_processors: HashMap<Uuid, Weak<WorkDeque<Handle>>>,
+
+    event_loop: Vec<Sender<(RawFd, Interest, Handle)>>,
+    cur_loop_idx: usize,
 }
 
 impl Scheduler {
@@ -54,6 +62,9 @@ impl Scheduler {
             starved_processors: VecDeque::new(),
             working_processors: HashMap::new(),
             blocked_processors: HashMap::new(),
+
+            event_loop: Vec::new(),
+            cur_loop_idx: 0,
         }
     }
 
@@ -310,9 +321,36 @@ impl Scheduler {
         }
         barrier.wait();
 
+        // Start eventloops
+        {
+            let mut eventloop = {
+                let mut sched = Scheduler::get().lock().unwrap();
+                let eventloop = EventLoop::new();
+                sched.event_loop.push(eventloop.event_sender());
+                eventloop
+            };
+            Scheduler::spawn(move|| {
+                loop {
+                    debug!("Eventloop registering events");
+                    eventloop.register_events().unwrap();
+                    debug!("Eventloop has {} waiting", eventloop.waiting_count());
+                    Processor::current().block(|| {
+                        debug!("Eventloop polling");
+                        eventloop.poll_once().unwrap();
+                    });
+                    Coroutine::sched();
+                }
+            });
+        }
+
         for fut in futs {
             fut.join().unwrap();
         }
+    }
+
+    pub fn register_event<F: AsRawFd>(&mut self, fd: &F, inst: Interest, hdl: Handle) {
+        self.event_loop[self.cur_loop_idx].send((fd.as_raw_fd(), inst, hdl)).unwrap();
+        self.cur_loop_idx = (self.cur_loop_idx + 1) % self.event_loop.len();
     }
 }
 

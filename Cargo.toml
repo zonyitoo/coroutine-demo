@@ -6,9 +6,9 @@ authors = ["Y. T. Chung <zonyitoo@gmail.com>"]
 [lib]
 name = "cosupport"
 
-#[[bin]]
-#name = "tcp-echo"
-#path = "src/bin/echoserver.rs"
+[[bin]]
+name = "tcp-echo"
+path = "src/bin/echoserver.rs"
 
 #[[bin]]
 #name = "http-echo"

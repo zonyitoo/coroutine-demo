@@ -183,13 +183,14 @@ impl Processor {
         true
     }
 
-    pub fn block<F, R>(&self, mut f: F) -> R
-        where F: FnMut() -> R {
+    pub fn block<F, R>(&mut self, mut f: F) -> R where F: FnMut() -> R {
+        self.is_blocked = true;
         {
             let mut sched = Scheduler::get().lock().unwrap();
             sched.processor_blocked(self);
         }
         let ret = f();
+        self.is_blocked = false;
         {
             let mut sched = Scheduler::get().lock().unwrap();
             sched.processor_unblocked(self);

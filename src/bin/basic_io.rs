@@ -5,6 +5,7 @@ extern crate env_logger;
 extern crate clap;
 
 use std::thread;
+use std::sync::mpsc::channel;
 
 use coroutine::coroutine::Coroutine;
 use clap::{App, Arg};
@@ -23,10 +24,12 @@ fn main() {
                     .help("Number of threads"))
             .get_matches();
 
-
     Scheduler::spawn(|| {
         let mut eventloop = EventLoop::new();
         loop {
+            // TODO: Register event
+
+
             Processor::current().block(|| {
                 println!("Blocking for eventloop {:?}", thread::current());
                 eventloop.poll_once().unwrap();
@@ -39,13 +42,6 @@ fn main() {
     Scheduler::spawn(|| {
         loop {
             println!("A {:?}", thread::current());
-            Coroutine::sched();
-        }
-    });
-
-    Scheduler::spawn(|| {
-        loop {
-            println!("B {:?}", thread::current());
             Coroutine::sched();
         }
     });

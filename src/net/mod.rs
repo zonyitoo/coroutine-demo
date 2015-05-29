@@ -20,13 +20,13 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 pub use self::tcp::{TcpListener, TcpStream, TcpSocket};
-pub use self::udp::UdpSocket;
+// pub use self::udp::UdpSocket;
 
 use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
 
 pub mod tcp;
-pub mod udp;
+// pub mod udp;
 
 fn each_addr<A: ToSocketAddrs, F, T>(addr: A, mut f: F) -> io::Result<T>
     where F: FnMut(&SocketAddr) -> io::Result<T>

@@ -26,6 +26,8 @@ use std::ops::{Deref, DerefMut};
 use mio::{self, Interest};
 use mio::buf::{Buf, MutBuf, MutSliceBuf, SliceBuf};
 
+use coroutine::coroutine::Coroutine;
+
 use scheduler::Scheduler;
 
 pub struct TcpSocket(::mio::tcp::TcpSocket);
@@ -95,7 +97,11 @@ impl TcpListener {
             }
         }
 
-        try!(Scheduler::current().wait_event(&self.0, Interest::readable()));
+        // try!(Scheduler::current().wait_event(&self.0, Interest::readable()));
+        debug!("Accept: Going to register event");
+        Scheduler::get().lock().unwrap().register_event(&self.0, Interest::readable(), Coroutine::current());
+        Coroutine::block();
+        debug!("Accept: Got readable event");
 
         match self.0.accept() {
             Ok(None) => {
@@ -186,7 +192,9 @@ impl io::Read for TcpStream {
         }
 
         debug!("Read: Going to register event");
-        try!(Scheduler::current().wait_event(&self.0, Interest::readable()));
+        // try!(Scheduler::current().wait_event(&self.0, Interest::readable()));
+        Scheduler::get().lock().unwrap().register_event(&self.0, Interest::readable(), Coroutine::current());
+        Coroutine::block();
         debug!("Read: Got read event");
 
         while buf.has_remaining() {
@@ -246,7 +254,9 @@ impl io::Write for TcpStream {
         }
 
         debug!("Write: Going to register event");
-        try!(Scheduler::current().wait_event(&self.0, Interest::writable()));
+        // try!(Scheduler::current().wait_event(&self.0, Interest::writable()));
+        Scheduler::get().lock().unwrap().register_event(&self.0, Interest::writable(), Coroutine::current());
+        Coroutine::block();
         debug!("Write: Got write event");
 
         while buf.has_remaining() {
