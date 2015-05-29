@@ -139,6 +139,7 @@ fn echo(mut req: Request, mut res: Response) {
     match req.uri {
         AbsolutePath(ref path) => match (&req.method, &path[..]) {
             (&Method::Get, "/") | (&Method::Get, "/echo") => {
+                res.headers_mut().set(Connection::close());
                 try_return!(res.send(b"Try POST /echo"));
                 return;
             },
