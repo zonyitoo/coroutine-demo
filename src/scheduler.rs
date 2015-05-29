@@ -205,12 +205,20 @@ impl Scheduler {
                     })
                     .max_by(|&(_, _, len)| len);
             match busy_proc {
-                Some((_, p, _)) => {
-                    let mut queue = p.work_queue().lock().unwrap();
-                    let steal_length = queue.len() / 2;
-                    if steal_length != 0 {
-                        processor.feed(queue.drain().take(steal_length));
-                        return;
+                Some((id, p, len)) => {
+                    if len >= BUSY_THRESHOLD {
+                        let mut queue = p.work_queue().lock().unwrap();
+                        let steal_length = queue.len() / 2;
+                        if steal_length != 0 {
+                            debug!("Steal {} works from {} for {}", steal_length, id, processor.id());
+                            // TODO: Bug! Using drain will actually throwing all items in the queue
+                            // processor.feed(queue.drain().take(steal_length));
+
+                            // FIXME: Do not need to re-allocate a new VecDeque
+                            processor.work_queue()
+                                .append(&mut queue.split_off(steal_length));
+                            return;
+                        }
                     }
                 },
                 None => {}

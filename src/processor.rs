@@ -106,6 +106,7 @@ impl<T> WorkDeque<T> {
 
     pub fn pop_front_timeout_ms(&self, ms: u32) -> Option<T> {
         let mut guard = self.work_queue.lock().unwrap();
+        debug!("WorkDeque remains {}", guard.len());
         while !self.is_stopped.load(Ordering::SeqCst) && guard.is_empty() {
             // guard = self.condvar.wait(guard).unwrap();
             let (g, _) = self.condvar.wait_timeout_ms(guard, ms).unwrap();
@@ -204,6 +205,7 @@ impl Processor {
 
         while !self.work_queue.is_stopped.load(Ordering::SeqCst) {
             let is_starving = self.work_queue.is_empty();
+            debug!("Processor {} is_starving? {}", self.id(), is_starving);
 
             if is_starving {
                 // Ask scheduler for more works
