@@ -53,5 +53,7 @@ git = "https://github.com/carllerche/mio.git"
 #git = "https://github.com/zonyitoo/mio.git"
 
 [dependencies.coroutine]
-git = "https://github.com/rustcc/coroutine-rs.git"
-rev = "b17d2a061a763a43f034a5c491387fc1dd5fd2cf"
+#git = "https://github.com/rustcc/coroutine-rs.git"
+#rev = "b17d2a061a763a43f034a5c491387fc1dd5fd2cf"
+git = "https://github.com/zonyitoo/coroutine-rs.git"
+rev = "42acad2129cc244c2847a2b28164d0577d000c55"

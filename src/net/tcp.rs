@@ -167,7 +167,7 @@ impl io::Read for TcpStream {
         let mut buf = MutSliceBuf::wrap(buf);
         let mut total_len = 0;
         while buf.has_remaining() {
-            match self.0.read(&mut buf) {
+            match self.0.try_read_buf(&mut buf) {
                 Ok(None) => {
                     debug!("TcpStream read WouldBlock");
                     break;
@@ -198,7 +198,7 @@ impl io::Read for TcpStream {
         debug!("Read: Got read event");
 
         while buf.has_remaining() {
-            match self.0.read(&mut buf) {
+            match self.0.try_read_buf(&mut buf) {
                 Ok(None) => {
                     debug!("TcpStream read WouldBlock");
                     break;
@@ -229,7 +229,7 @@ impl io::Write for TcpStream {
         let mut total_len = 0;
 
         while buf.has_remaining() {
-            match self.0.write(&mut buf) {
+            match self.0.try_write_buf(&mut buf) {
                 Ok(None) => {
                     debug!("TcpStream write WouldBlock");
                     break;
@@ -260,7 +260,7 @@ impl io::Write for TcpStream {
         debug!("Write: Got write event");
 
         while buf.has_remaining() {
-            match self.0.write(&mut buf) {
+            match self.0.try_write_buf(&mut buf) {
                 Ok(None) => {
                     debug!("TcpStream write WouldBlock");
                     break;
