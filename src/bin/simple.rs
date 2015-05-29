@@ -24,7 +24,7 @@ fn main() {
             .get_matches();
 
 
-    const ALPHABETS: &'static str = "ABCDEFGHIJKLMN";
+    const ALPHABETS: &'static str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
     let to_sleep = match matches.value_of("TOSLEEP") {
         Some(..) => true,
