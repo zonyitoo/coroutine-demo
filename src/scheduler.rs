@@ -305,22 +305,6 @@ impl Scheduler {
 
 impl Scheduler {
     pub fn run(threads: usize) {
-        let mut futs = Vec::new();
-        let barrier = Arc::new(Barrier::new(threads + 1));
-        for n in 0..threads {
-            let barrier = barrier.clone();
-            let guard = thread::Builder::new().name(format!("Worker thread #{}", n)).spawn(move|| {
-                {
-                    let mut sched = Scheduler::get().lock().unwrap();
-                    sched.processor_create(Processor::current());
-                }
-                barrier.wait();
-                Processor::current().run();
-            }).unwrap();
-            futs.push(guard);
-        }
-        barrier.wait();
-
         // Start eventloops
         {
             let mut eventloop = {
@@ -342,6 +326,22 @@ impl Scheduler {
                 }
             });
         }
+
+        let mut futs = Vec::new();
+        let barrier = Arc::new(Barrier::new(threads + 1));
+        for n in 0..threads {
+            let barrier = barrier.clone();
+            let guard = thread::Builder::new().name(format!("Worker thread #{}", n)).spawn(move|| {
+                {
+                    let mut sched = Scheduler::get().lock().unwrap();
+                    sched.processor_create(Processor::current());
+                }
+                barrier.wait();
+                Processor::current().run();
+            }).unwrap();
+            futs.push(guard);
+        }
+        barrier.wait();
 
         for fut in futs {
             fut.join().unwrap();
