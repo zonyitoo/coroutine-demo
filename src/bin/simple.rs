@@ -34,6 +34,9 @@ fn main() {
     for c in ALPHABETS.chars() {
         Scheduler::spawn(move|| {
             loop {
+                Scheduler::spawn(move|| {
+                    println!("Inside {} {:?}", c, thread::current());
+                });
                 println!("{} {:?}", c, thread::current());
                 if to_sleep {
                     thread::sleep_ms(100);

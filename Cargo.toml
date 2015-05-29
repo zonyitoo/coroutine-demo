@@ -26,6 +26,10 @@ path = "src/bin/test_autoexit.rs"
 name = "simple"
 path = "src/bin/simple.rs"
 
+[[bin]]
+name = "basic-io"
+path = "src/bin/basic_io.rs"
+
 [dependencies]
 #coroutine = "*"
 num_cpus = "*"

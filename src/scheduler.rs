@@ -254,14 +254,41 @@ impl Scheduler {
         self.blocked_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
 
         let mut queue = processor.work_queue().work_queue().lock().unwrap();
+
+        // Try to find a starved processor
+        loop {
+            match self.starved_processors.pop_front() {
+                None => break,
+                Some((uuid, weakp)) => {
+                    match weakp.upgrade() {
+                        Some(p) => {
+                            debug!("Gave it to a starved processor");
+                            p.work_queue().lock().unwrap().extend(queue.drain());
+                            self.working_processors.insert(uuid, weakp);
+                            return;
+                        },
+                        None => {}
+                    }
+                }
+            }
+        }
+
+        // Give them to the global queue
         self.global_queue.extend(queue.drain());
     }
 
-    pub fn processor_unblocked(&mut self, processor: &mut Processor) {
+    pub fn processor_unblocked(&mut self, processor: &Processor) {
         // TODO: Remove it from the blocked processors
         // let mut scheduler = Scheduler::get().lock().unwrap();
         self.blocked_processors.remove(processor.id());
-        // scheduler.working_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
+        self.working_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
+
+        debug!("Trying to feed {} with global queue", processor.id());
+        if !self.global_queue.is_empty() {
+            debug!("Feed {} with global queue; count={}", processor.id(), self.global_queue.len());
+            let ret = processor.feed(self.global_queue.drain());
+            assert!(ret);
+        }
     }
 }
 

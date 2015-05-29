@@ -183,6 +183,20 @@ impl Processor {
         true
     }
 
+    pub fn block<F, R>(&self, mut f: F) -> R
+        where F: FnMut() -> R {
+        {
+            let mut sched = Scheduler::get().lock().unwrap();
+            sched.processor_blocked(self);
+        }
+        let ret = f();
+        {
+            let mut sched = Scheduler::get().lock().unwrap();
+            sched.processor_unblocked(self);
+        }
+        ret
+    }
+
     pub fn work_queue(&self) -> &Arc<WorkDeque<Handle>> {
         &self.work_queue
     }
