@@ -20,18 +20,11 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use std::thread;
-use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
-use std::sync::{Mutex, Once, ONCE_INIT};
-use std::mem;
-use std::cell::UnsafeCell;
-use std::sync::atomic::{ATOMIC_BOOL_INIT, AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak, Barrier};
 use std::collections::{HashMap, VecDeque};
 
 use coroutine::spawn;
-use coroutine::coroutine::{State, Handle, Coroutine, Options};
-
-use deque::{BufferPool, Stealer, Worker, Stolen};
+use coroutine::coroutine::{Handle, Coroutine, Options};
 
 use uuid::Uuid;
 
@@ -165,22 +158,43 @@ impl Scheduler {
         idx.map(|i| scheduler.starved_processors.swap_back_remove(i));
     }
 
-    pub fn processor_starving(processor: &Processor) {
-        let mut scheduler = Scheduler::get().lock().unwrap();
+    pub fn processor_starving(&mut self, processor: &mut Processor) {
+        // let mut scheduler = Scheduler::get().lock().unwrap();
+        debug!("Processor {} is starving; thread {:?}", processor.id(), thread::current());
 
         // 1. Feed him with global queue
-        if !scheduler.global_queue.is_empty() {
-            debug!("Feed {} with global queue; count={}", processor.id(), scheduler.global_queue.len());
-            let ret = processor.feed(scheduler.global_queue.drain());
+        if !self.global_queue.is_empty() {
+            debug!("Feed {} with global queue; count={}", processor.id(), self.global_queue.len());
+            let ret = processor.feed(self.global_queue.drain());
             assert!(ret);
+            return;
+        }
+
+        if self.working_processors.len() + self.blocked_processors.len() <= 1 {
+            debug!("No remaining Coroutines in the scheduler, ask all workers to stop");
+
+            processor.stop();
+
+            for (_, p) in self.starved_processors.drain() {
+                match p.upgrade() {
+                    Some(p) => {
+                        p.stop();
+                    },
+                    None => {}
+                }
+            }
+
             return;
         }
 
         // 2. Steal some for him
         // Steal works from the most busy processors
         {
-            let busy_proc = scheduler.working_processors.iter()
+            let busy_proc = self.working_processors.iter()
                     .filter_map(|(id, weakp)| {
+                        if id == processor.id() {
+                            return None;
+                        }
                         match weakp.upgrade() {
                             Some(p) => {
                                 let len = p.len();
@@ -190,13 +204,14 @@ impl Scheduler {
                         }
                     })
                     .max_by(|&(_, _, len)| len);
-
             match busy_proc {
                 Some((_, p, _)) => {
                     let mut queue = p.work_queue().lock().unwrap();
                     let steal_length = queue.len() / 2;
-                    processor.feed(queue.drain().take(steal_length));
-                    return;
+                    if steal_length != 0 {
+                        processor.feed(queue.drain().take(steal_length));
+                        return;
+                    }
                 },
                 None => {}
             }
@@ -206,50 +221,58 @@ impl Scheduler {
         // Record it as a starved processor or exit
         {
             let procid = processor.id().clone();
-            scheduler.working_processors.remove(&procid);
-            scheduler.starved_processors.push_back((procid, processor.work_queue().downgrade()));
+            self.working_processors.remove(&procid);
+            self.starved_processors.push_back((procid, processor.work_queue().downgrade()));
             debug!("Processor {} exiled", procid);
         }
     }
 
-    pub fn processor_create(processor: &Processor) {
+    pub fn processor_create(&mut self, processor: &Processor) {
         // TODO: If the number of current working processors has not exceeded MAX_PROC
         //       Then we could create a new processor
-        let mut scheduler = Scheduler::get().lock().unwrap();
-        scheduler.working_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
+        // let mut scheduler = Scheduler::get().lock().unwrap();
+        self.working_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
     }
 
-    pub fn processor_blocked(processor: &Processor) {
+    pub fn processor_blocked(&mut self, processor: &Processor) {
         // TODO: Takes all works from the processor
         //       Record it as a blocked processor
-        let mut scheduler = Scheduler::get().lock().unwrap();
-        scheduler.working_processors.remove(processor.id());
-        scheduler.blocked_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
+        // let mut self = Scheduler::get().lock().unwrap();
+        self.working_processors.remove(processor.id());
+        self.blocked_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
 
         let mut queue = processor.work_queue().work_queue().lock().unwrap();
-        scheduler.global_queue.extend(queue.drain());
+        self.global_queue.extend(queue.drain());
     }
 
-    pub fn processor_unblocked(processor: &mut Processor) {
+    pub fn processor_unblocked(&mut self, processor: &mut Processor) {
         // TODO: Remove it from the blocked processors
-        let mut scheduler = Scheduler::get().lock().unwrap();
-        scheduler.blocked_processors.remove(processor.id());
-        scheduler.working_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
+        // let mut scheduler = Scheduler::get().lock().unwrap();
+        self.blocked_processors.remove(processor.id());
+        // scheduler.working_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
     }
 }
 
 impl Scheduler {
     pub fn run(threads: usize) {
         let mut futs = Vec::new();
+        let barrier = Arc::new(Barrier::new(threads + 1));
         for n in 0..threads {
-            let guard = thread::Builder::new().name(format!("Worker thread #{}", n)).scoped(move|| {
+            let barrier = barrier.clone();
+            let guard = thread::Builder::new().name(format!("Worker thread #{}", n)).spawn(move|| {
+                {
+                    let mut sched = Scheduler::get().lock().unwrap();
+                    sched.processor_create(Processor::current());
+                }
+                barrier.wait();
                 Processor::current().run();
             }).unwrap();
             futs.push(guard);
         }
+        barrier.wait();
 
         for fut in futs {
-            fut.join();
+            fut.join().unwrap();
         }
     }
 }

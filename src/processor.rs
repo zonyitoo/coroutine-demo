@@ -27,6 +27,7 @@ use std::os::unix::io::AsRawFd;
 #[cfg(target_os = "linux")]
 use std::convert::From;
 use std::sync::{Arc, Weak, Mutex, Condvar};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::iter::{IntoIterator, DoubleEndedIterator, ExactSizeIterator, Extend};
 
@@ -43,6 +44,7 @@ const WORKQUEUE_DEFAULT_CAPACITY: usize = 1024;
 pub struct WorkDeque<T> {
     work_queue: Mutex<VecDeque<T>>,
     condvar: Condvar,
+    is_stopped: AtomicBool,
 }
 
 impl<T> WorkDeque<T> {
@@ -54,6 +56,7 @@ impl<T> WorkDeque<T> {
         WorkDeque {
             work_queue: Mutex::new(VecDeque::with_capacity(capacity)),
             condvar: Condvar::new(),
+            is_stopped: AtomicBool::new(false),
         }
     }
 
@@ -68,29 +71,45 @@ impl<T> WorkDeque<T> {
     }
 
     pub fn push_back(&self, data: T) {
-        let mut guard = self.work_queue.lock().unwrap();
-        guard.push_back(data);
+        {
+            let mut guard = self.work_queue.lock().unwrap();
+            guard.push_back(data);
+        }
         self.condvar.notify_one();
     }
 
     pub fn push_front(&self, data: T) {
-        let mut guard = self.work_queue.lock().unwrap();
-        guard.push_front(data);
+        {
+            let mut guard = self.work_queue.lock().unwrap();
+            guard.push_front(data);
+        }
         self.condvar.notify_one();
     }
 
-    pub fn pop_back(&self) -> Option<T> {
-        let mut guard = self.work_queue.lock().unwrap();
-        while guard.is_empty() {
-            guard = self.condvar.wait(guard).unwrap();
-        }
-        guard.pop_back()
-    }
+    // pub fn pop_back(&self) -> Option<T> {
+    //     let mut guard = self.work_queue.lock().unwrap();
+    //     while !self.is_stopped && guard.is_empty() {
+    //         guard = self.condvar.wait(guard).unwrap();
+    //     }
+    //     guard.pop_back()
+    // }
 
     pub fn pop_front(&self) -> Option<T> {
         let mut guard = self.work_queue.lock().unwrap();
-        while guard.is_empty() {
+        while !self.is_stopped.load(Ordering::SeqCst) && guard.is_empty() {
             guard = self.condvar.wait(guard).unwrap();
+            // let (g, _) = self.condvar.wait_timeout_ms(guard, 1000).unwrap();
+            // guard = g;
+        }
+        guard.pop_front()
+    }
+
+    pub fn pop_front_timeout_ms(&self, ms: u32) -> Option<T> {
+        let mut guard = self.work_queue.lock().unwrap();
+        while !self.is_stopped.load(Ordering::SeqCst) && guard.is_empty() {
+            // guard = self.condvar.wait(guard).unwrap();
+            let (g, _) = self.condvar.wait_timeout_ms(guard, ms).unwrap();
+            guard = g;
         }
         guard.pop_front()
     }
@@ -103,6 +122,11 @@ impl<T> WorkDeque<T> {
 
     pub fn work_queue(&self) -> &Mutex<VecDeque<T>> {
         &self.work_queue
+    }
+
+    pub fn stop(&self) {
+        self.is_stopped.store(true, Ordering::SeqCst);
+        self.condvar.notify_all();
     }
 }
 
@@ -160,6 +184,12 @@ impl Processor {
         &self.work_queue
     }
 
+    pub fn stop(&mut self) {
+        self.work_queue.is_stopped.store(true, Ordering::SeqCst);
+        self.is_stopped = true;
+        self.work_queue.condvar.notify_all();
+    }
+
     pub fn run(&mut self) {
         // struct RunGuard<'a>(&'a mut Processor);
 
@@ -172,49 +202,55 @@ impl Processor {
         self.is_stopped = false;
         // let _guard = RunGuard(self);
 
-        loop {
+        while !self.work_queue.is_stopped.load(Ordering::SeqCst) {
             let is_starving = self.work_queue.is_empty();
 
             if is_starving {
                 // Ask scheduler for more works
-                Scheduler::processor_starving(self);
+                let mut sched = Scheduler::get().lock().unwrap();
+                sched.processor_starving(self);
             }
 
-            let coro = {
-                match self.work_queue.pop_front() {
+            if self.work_queue.is_stopped.load(Ordering::SeqCst) {
+                break;
+            }
+
+            while !self.work_queue.is_stopped.load(Ordering::SeqCst) {
+                match self.work_queue.pop_front_timeout_ms(1000) {
                     None => {
                         // There must someone wake me up to stop!!
-                        info!("Processor is going to stop");
-                        return;
+                        info!("Processor may going to stop");
                     },
-                    Some(coro) => coro
-                }
-            };
+                    Some(coro) => {
+                        if let Err(err) = coro.resume() {
+                            let msg = match err.downcast_ref::<&'static str>() {
+                                Some(s) => *s,
+                                None => match err.downcast_ref::<String>() {
+                                    Some(s) => &s[..],
+                                    None => "Box<Any>",
+                                }
+                            };
+                            error!("Coroutine resume failed because of {:?}", msg);
+                        }
 
-            if let Err(err) = coro.resume() {
-                let msg = match err.downcast_ref::<&'static str>() {
-                    Some(s) => *s,
-                    None => match err.downcast_ref::<String>() {
-                        Some(s) => &s[..],
-                        None => "Box<Any>",
+                        match coro.state() {
+                            State::Suspended => {
+                                let mut queue = self.work_queue.work_queue().lock().unwrap();
+                                if queue.len() >= scheduler::BUSY_THRESHOLD {
+                                    Scheduler::give(coro);
+                                } else {
+                                    queue.push_back(coro);
+                                }
+                            },
+                            _ => {
+                                debug!("Coroutine state is {:?}, will not be reschedured automatically", coro.state());
+                            }
+                        }
+                        break;
                     }
-                };
-                error!("Coroutine resume failed because of {:?}", msg);
-            }
-
-            match coro.state() {
-                State::Suspended => {
-                    let mut queue = self.work_queue.work_queue().lock().unwrap();
-                    if queue.len() >= scheduler::BUSY_THRESHOLD {
-                        Scheduler::give(coro);
-                    } else {
-                        queue.push_back(coro);
-                    }
-                },
-                _ => {
-                    debug!("Coroutine state is {:?}, will not be reschedured automatically", coro.state());
                 }
             }
         }
+        debug!("Processor {} exited", self.id());
     }
 }

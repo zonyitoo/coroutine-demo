@@ -14,9 +14,9 @@ name = "cosupport"
 #name = "http-echo"
 #path = "src/bin/httpechoserver.rs"
 
-#[[bin]]
-#name = "autoexit"
-#path = "src/bin/test_autoexit.rs"
+[[bin]]
+name = "autoexit"
+path = "src/bin/test_autoexit.rs"
 
 #[[bin]]
 #name = "udp-echo"

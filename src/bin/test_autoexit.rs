@@ -1,13 +1,14 @@
 extern crate cosupport;
+extern crate env_logger;
 
 use cosupport::scheduler::Scheduler;
 
 fn main() {
-    Scheduler::run(|| {
-        Scheduler::spawn(|| {
-            println!("Fuck something ...");
-        });
+    env_logger::init().unwrap();
 
-        println!("Running, going to exit now...");
-    }, 10);
+    Scheduler::spawn(|| {
+        println!("Running and going to exit");
+    });
+
+    Scheduler::run(2);
 }
