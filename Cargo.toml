@@ -10,9 +10,9 @@ name = "cosupport"
 name = "tcp-echo"
 path = "src/bin/echoserver.rs"
 
-#[[bin]]
-#name = "http-echo"
-#path = "src/bin/httpechoserver.rs"
+[[bin]]
+name = "http-echo"
+path = "src/bin/httpechoserver.rs"
 
 [[bin]]
 name = "autoexit"
