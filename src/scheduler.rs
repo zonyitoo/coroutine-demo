@@ -21,7 +21,7 @@
 
 use std::thread;
 use std::sync::{Arc, Mutex, Weak, Barrier};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::Sender;
 use std::os::unix::io::{AsRawFd, RawFd};
 
@@ -46,9 +46,10 @@ pub struct Scheduler {
 
     // TODO: How to store processors??
     // std::sync::Weak?
-    starved_processors: VecDeque<(Uuid, Weak<WorkDeque<Handle>>)>,
-    working_processors: HashMap<Uuid, Weak<WorkDeque<Handle>>>,
-    blocked_processors: HashMap<Uuid, Weak<WorkDeque<Handle>>>,
+    starved_processors: VecDeque<Uuid>,
+    working_processors: HashSet<Uuid>,
+    blocked_processors: HashSet<Uuid>,
+    all_processors: HashMap<Uuid, Weak<WorkDeque<Handle>>>,
 
     event_loop: Vec<Sender<(RawFd, Interest, Handle)>>,
     cur_loop_idx: usize,
@@ -60,8 +61,9 @@ impl Scheduler {
             global_queue: VecDeque::new(),
 
             starved_processors: VecDeque::new(),
-            working_processors: HashMap::new(),
-            blocked_processors: HashMap::new(),
+            working_processors: HashSet::new(),
+            blocked_processors: HashSet::new(),
+            all_processors: HashMap::new(),
 
             event_loop: Vec::new(),
             cur_loop_idx: 0,
@@ -80,15 +82,17 @@ impl Scheduler {
         loop {
             match self.starved_processors.pop_front() {
                 None => break,
-                Some((uuid, weakp)) => {
-                    match weakp.upgrade() {
-                        Some(p) => {
-                            debug!("Gave it to a starved processor");
-                            p.push_back(hdl);
-                            self.working_processors.insert(uuid, weakp);
-                            return;
-                        },
-                        None => {}
+                Some(uuid) => {
+                    if let Some(weakp) = self.all_processors.get(&uuid) {
+                        match weakp.upgrade() {
+                            Some(p) => {
+                                debug!("Gave it to a starved processor");
+                                p.push_back(hdl);
+                                self.working_processors.insert(uuid);
+                                return;
+                            },
+                            None => {}
+                        }
                     }
                 }
             }
@@ -150,17 +154,19 @@ impl Scheduler {
         // TODO: Processor exited, cleanup
         let mut scheduler = Scheduler::get().lock().unwrap();
 
-        if scheduler.working_processors.remove(processor.id()).is_some() {
+        scheduler.all_processors.remove(processor.id());
+
+        if scheduler.working_processors.remove(processor.id()) {
             return;
         }
 
-        if scheduler.blocked_processors.remove(processor.id()).is_some() {
+        if scheduler.blocked_processors.remove(processor.id()) {
             return;
         }
 
         let mut idx = None;
-        for (i, &(id, _)) in scheduler.starved_processors.iter().enumerate() {
-            if &id == processor.id() {
+        for (i, id) in scheduler.starved_processors.iter().enumerate() {
+            if id == processor.id() {
                 idx = Some(i);
                 break;
             }
@@ -187,12 +193,14 @@ impl Scheduler {
 
             processor.stop();
 
-            for (_, p) in self.starved_processors.drain() {
-                match p.upgrade() {
-                    Some(p) => {
-                        p.stop();
-                    },
-                    None => {}
+            for id in self.starved_processors.drain() {
+                if let Some(p) = self.all_processors.get(&id) {
+                    match p.upgrade() {
+                        Some(p) => {
+                            p.stop();
+                        },
+                        None => {}
+                    }
                 }
             }
 
@@ -204,16 +212,21 @@ impl Scheduler {
         debug!("Trying to steal for {}", processor.id());
         {
             let busy_proc = self.working_processors.iter()
-                    .filter_map(|(id, weakp)| {
+                    .filter_map(|id| {
                         if id == processor.id() {
                             return None;
                         }
-                        match weakp.upgrade() {
-                            Some(p) => {
-                                let len = p.len();
-                                Some((id, p, len))
-                            },
-                            None => None,
+
+                        if let Some(weakp) = self.all_processors.get(id) {
+                            match weakp.upgrade() {
+                                Some(p) => {
+                                    let len = p.len();
+                                    Some((id, p, len))
+                                },
+                                None => None,
+                            }
+                        } else {
+                            None
                         }
                     })
                     .max_by(|&(_, _, len)| len);
@@ -245,7 +258,7 @@ impl Scheduler {
         {
             let procid = processor.id().clone();
             self.working_processors.remove(&procid);
-            self.starved_processors.push_back((procid, processor.work_queue().downgrade()));
+            self.starved_processors.push_back(procid);
             debug!("Processor {} exiled", procid);
         }
     }
@@ -254,7 +267,8 @@ impl Scheduler {
         // TODO: If the number of current working processors has not exceeded MAX_PROC
         //       Then we could create a new processor
         // let mut scheduler = Scheduler::get().lock().unwrap();
-        self.working_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
+        self.all_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
+        self.working_processors.insert(processor.id().clone());
     }
 
     pub fn processor_blocked(&mut self, processor: &Processor) {
@@ -262,7 +276,7 @@ impl Scheduler {
         //       Record it as a blocked processor
         // let mut self = Scheduler::get().lock().unwrap();
         self.working_processors.remove(processor.id());
-        self.blocked_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
+        self.blocked_processors.insert(processor.id().clone());
 
         let mut queue = processor.work_queue().work_queue().lock().unwrap();
 
@@ -270,15 +284,17 @@ impl Scheduler {
         loop {
             match self.starved_processors.pop_front() {
                 None => break,
-                Some((uuid, weakp)) => {
-                    match weakp.upgrade() {
-                        Some(p) => {
-                            debug!("Gave it to a starved processor");
-                            p.work_queue().lock().unwrap().extend(queue.drain());
-                            self.working_processors.insert(uuid, weakp);
-                            return;
-                        },
-                        None => {}
+                Some(uuid) => {
+                    if let Some(weakp) = self.all_processors.get(&uuid) {
+                        match weakp.upgrade() {
+                            Some(p) => {
+                                debug!("Gave it to a starved processor");
+                                p.work_queue().lock().unwrap().extend(queue.drain());
+                                self.working_processors.insert(uuid);
+                                return;
+                            },
+                            None => {}
+                        }
                     }
                 }
             }
@@ -292,7 +308,7 @@ impl Scheduler {
         // TODO: Remove it from the blocked processors
         // let mut scheduler = Scheduler::get().lock().unwrap();
         self.blocked_processors.remove(processor.id());
-        self.working_processors.insert(processor.id().clone(), processor.work_queue().downgrade());
+        self.working_processors.insert(processor.id().clone());
 
         debug!("Trying to feed {} with global queue", processor.id());
         if !self.global_queue.is_empty() {
