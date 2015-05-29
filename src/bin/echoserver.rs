@@ -11,6 +11,7 @@ use clap::{Arg, App};
 
 use cosupport::scheduler::Scheduler;
 use cosupport::net::tcp::TcpSocket;
+use cosupport::net::tcp::TcpListener;
 
 fn main() {
     env_logger::init().unwrap();
@@ -27,13 +28,14 @@ fn main() {
     let bind_addr = matches.value_of("BIND").unwrap().to_owned();
 
     Scheduler::spawn(move|| {
-        let addr = bind_addr.parse().unwrap();
-        let server = match &addr {
-            &SocketAddr::V4(..) => TcpSocket::v4(),
-            &SocketAddr::V6(..) => TcpSocket::v6(),
-        }.unwrap();
-        server.set_reuseaddr(true).unwrap();
-        let server = server.listen(64).unwrap();
+        // let addr = bind_addr.parse().unwrap();
+        // let server = match &addr {
+        //     &SocketAddr::V4(..) => TcpSocket::v4(),
+        //     &SocketAddr::V6(..) => TcpSocket::v6(),
+        // }.unwrap();
+        // server.set_reuseaddr(true).unwrap();
+        // let server = server.listen(64).unwrap();
+        let server = TcpListener::bind(&bind_addr[..]).unwrap();
 
         info!("Listening on {:?}", server.local_addr().unwrap());
 

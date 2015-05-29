@@ -349,6 +349,8 @@ impl Scheduler {
     }
 
     pub fn register_event<F: AsRawFd>(&mut self, fd: &F, inst: Interest, hdl: Handle) {
+        debug!("Registering event {:?} to idx {}; total eventloop: {}",
+               inst, self.cur_loop_idx, self.event_loop.len());
         self.event_loop[self.cur_loop_idx].send((fd.as_raw_fd(), inst, hdl)).unwrap();
         self.cur_loop_idx = (self.cur_loop_idx + 1) % self.event_loop.len();
     }
