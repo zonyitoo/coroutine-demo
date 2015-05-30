@@ -53,6 +53,8 @@ pub struct Scheduler {
 
     event_loop: Vec<Sender<(RawFd, Interest, Handle)>>,
     cur_loop_idx: usize,
+
+    max_running_threads: usize,
 }
 
 impl Scheduler {
@@ -67,6 +69,8 @@ impl Scheduler {
 
             event_loop: Vec::new(),
             cur_loop_idx: 0,
+
+            max_running_threads: 0,
         }
     }
 
@@ -278,6 +282,10 @@ impl Scheduler {
         self.working_processors.remove(processor.id());
         self.blocked_processors.insert(processor.id().clone());
 
+        if self.max_running_threads <= 1 {
+            return;
+        }
+
         let mut queue = processor.work_queue().work_queue().lock().unwrap();
 
         // Try to find a starved processor
@@ -325,6 +333,7 @@ impl Scheduler {
         {
             let mut eventloop = {
                 let mut sched = Scheduler::get().lock().unwrap();
+                sched.max_running_threads = threads;
                 let eventloop = EventLoop::new();
                 sched.event_loop.push(eventloop.event_sender());
                 eventloop
@@ -334,10 +343,12 @@ impl Scheduler {
                     debug!("Eventloop registering events");
                     eventloop.register_events().unwrap();
                     debug!("Eventloop has {} waiting", eventloop.waiting_count());
-                    Processor::current().block(|| {
-                        debug!("Eventloop polling");
-                        eventloop.poll_once().unwrap();
-                    });
+                    if eventloop.waiting_count() != 0 {
+                        Processor::current().block(|| {
+                            debug!("Eventloop polling");
+                            eventloop.poll_once().unwrap();
+                        });
+                    }
                     Coroutine::sched();
                 }
             });
