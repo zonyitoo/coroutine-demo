@@ -4,7 +4,7 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 #[cfg(target_os = "linux")]
 use std::convert::From;
-use std::sync::Arc;
+use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 
 use coroutine::coroutine::{State, Handle, Coroutine};
 
@@ -13,25 +13,56 @@ use mio::util::Slab;
 #[cfg(target_os = "linux")]
 use mio::Io;
 
-use mpmc::Queue;
+use deque::{BufferPool, Worker, Stealer, Stolen};
 
-use scheduler::Scheduler;
+use rand::random;
+
+use scheduler::{Scheduler, SchedMessage};
 
 thread_local!(static PROCESSOR: UnsafeCell<Processor> = UnsafeCell::new(Processor::new()));
 
 pub struct Processor {
     event_loop: EventLoop<IoHandler>,
-    work_queue: Arc<Queue<Handle>>,
+    queue_worker: Worker<Handle>,
+    queue_stealer: Stealer<Handle>,
+    neighbors: Vec<(Sender<SchedMessage>, Stealer<Handle>)>,
+    message_receiver: Receiver<SchedMessage>,
     handler: IoHandler,
+    steal_buffer: Vec<Handle>,
 }
 
 impl Processor {
     pub fn new() -> Processor {
+        let pool = BufferPool::new();
+        let (w, s) = pool.deque();
+
+        let (tx, rx) = channel();
+
+        let neighbors = {
+            let mut neigh = Scheduler::get().processors().lock().unwrap();
+
+            for &(ref ntx, _) in neigh.iter() {
+                let _ = ntx.send(SchedMessage::NewNeighbor((tx.clone(), s.clone())));
+            }
+
+            let cloned = neigh.clone();
+            neigh.push((tx, s.clone()));
+            cloned
+        };
+
         Processor {
             event_loop: EventLoop::new().unwrap(),
-            work_queue: Scheduler::get().get_queue(),
+            queue_worker: w,
+            queue_stealer: s,
+            neighbors: neighbors,
+            message_receiver: rx,
             handler: IoHandler::new(),
+            steal_buffer: Vec::new(),
         }
+    }
+
+    pub fn ready(&self, hdl: Handle) {
+        self.queue_worker.push(hdl)
     }
 
     pub fn current() -> &'static mut Processor {
@@ -40,34 +71,68 @@ impl Processor {
 
     pub fn schedule(&mut self) -> io::Result<()> {
         loop {
+            match self.message_receiver.try_recv() {
+                Ok(SchedMessage::NewNeighbor(handle)) => {
+                    self.neighbors.push(handle);
+                },
+                Err(TryRecvError::Empty) => {},
+                Err(err) => {
+                    panic!("Failed to receive sched messages {:?}", err);
+                }
+            }
+
             if self.handler.slabs.count() != 0 {
                 try!(self.event_loop.run_once(&mut self.handler));
             }
 
-            match self.work_queue.try_dequeue() {
-                Some(hdl) => {
-                    match hdl.resume() {
-                        Ok(..) => {
-                            match hdl.state() {
-                                State::Suspended => {
-                                    Scheduler::ready(hdl);
-                                },
-                                State::Finished | State::Panicked => {
-                                    Scheduler::finished(hdl);
+            let mut need_steal = false;
+            loop {
+                match self.queue_stealer.steal() {
+                    Stolen::Data(hdl) => {
+                        match hdl.resume() {
+                            Ok(..) => {
+                                match hdl.state() {
+                                    State::Suspended => {
+                                        self.ready(hdl);
+                                    },
+                                    State::Finished | State::Panicked => {
+                                        Scheduler::finished(hdl);
+                                    },
+                                    _ => {}
                                 }
-                                _ => {}
+                            },
+                            Err(err) => {
+                                error!("Coroutine resume error {:?}", err);
                             }
-                        },
-                        Err(err) => {
-                            error!("Coroutine resume failed, {:?}", err);
                         }
-                    }
-                },
-                None => {
-                    if Scheduler::get().work_count() == 0 {
+                        break;
+                    },
+                    Stolen::Abort => {},
+                    Stolen::Empty => {
+                        need_steal = true;
                         break;
                     }
                 }
+            }
+
+            if !need_steal || self.handler.slabs.count() != 0 {
+                continue;
+            }
+
+            if !self.neighbors.is_empty() {
+                let rand_idx = random::<usize>() % self.neighbors.len();
+                match self.neighbors[rand_idx].1.steal_half(&mut self.steal_buffer) {
+                    Some(n) => {
+                        debug!("Stolen {} coroutines", n);
+                        self.queue_worker.push_all(&mut self.steal_buffer);
+                        continue;
+                    },
+                    None => {}
+                }
+            }
+
+            if Scheduler::get().work_count() == 0 {
+                break;
             }
         }
 
@@ -122,7 +187,7 @@ impl Handler for IoHandler {
                 // Linux EPoll needs to explicit EPOLL_CTL_DEL the fd
                 event_loop.deregister(&fd).unwrap();
                 mem::forget(fd);
-                Scheduler::current().ready(hdl);
+                Processor::current().ready(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on writable {:?}", token);
@@ -140,7 +205,7 @@ impl Handler for IoHandler {
                 // Linux EPoll needs to explicit EPOLL_CTL_DEL the fd
                 event_loop.deregister(&fd).unwrap();
                 mem::forget(fd);
-                Scheduler::current().ready(hdl);
+                Processor::current().ready(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on readable {:?}", token);
@@ -196,7 +261,7 @@ impl Handler for IoHandler {
 
         match self.slabs.remove(token) {
             Some(hdl) => {
-                Scheduler::ready(hdl);
+                Processor::current().ready(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on writable {:?}", token);
@@ -211,7 +276,7 @@ impl Handler for IoHandler {
 
         match self.slabs.remove(token) {
             Some(hdl) => {
-                Scheduler::ready(hdl);
+                Processor::current().ready(hdl);
             },
             None => {
                 warn!("No coroutine is waiting on readable {:?}", token);

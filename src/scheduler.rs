@@ -21,12 +21,13 @@
 
 use std::thread;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Mutex, Arc};
+use std::sync::mpsc::Sender;
 
 use coroutine::spawn;
 use coroutine::coroutine::{Handle, Coroutine};
 
-use mpmc::Queue;
+use deque::Stealer;
 
 use processor::Processor;
 
@@ -34,20 +35,22 @@ lazy_static! {
     static ref SCHEDULER: Scheduler = Scheduler::new();
 }
 
+pub enum SchedMessage {
+    NewNeighbor((Sender<SchedMessage>, Stealer<Handle>)),
+}
+
 pub struct Scheduler {
-    global_queue: Arc<Queue<Handle>>,
+    processors: Mutex<Vec<(Sender<SchedMessage>, Stealer<Handle>)>>,
     work_counts: AtomicUsize,
 }
 
 unsafe impl Send for Scheduler {}
 unsafe impl Sync for Scheduler {}
 
-const GLOBAL_QUEUE_SIZE: usize = 0x1000;
-
 impl Scheduler {
     pub fn new() -> Scheduler {
         Scheduler {
-            global_queue: Arc::new(Queue::new(GLOBAL_QUEUE_SIZE)),
+            processors: Mutex::new(Vec::new()),
             work_counts: AtomicUsize::new(0),
         }
     }
@@ -56,12 +59,8 @@ impl Scheduler {
         &SCHEDULER
     }
 
-    pub fn ready(hdl: Handle) {
-        Scheduler::get().global_queue.enqueue(hdl);
-    }
-
-    pub fn get_queue(&self) -> Arc<Queue<Handle>> {
-        self.global_queue.clone()
+    pub fn processors(&self) -> &Mutex<Vec<(Sender<SchedMessage>, Stealer<Handle>)>> {
+        &self.processors
     }
 
     pub fn finished(_: Handle) {
@@ -75,7 +74,7 @@ impl Scheduler {
     pub fn spawn<F>(f: F)
             where F: FnOnce() + 'static + Send {
         let coro = Coroutine::spawn(f);
-        Scheduler::ready(coro);
+        Processor::current().ready(coro);
         Scheduler::get().work_counts.fetch_add(1, Ordering::SeqCst);
         Coroutine::sched();
     }
