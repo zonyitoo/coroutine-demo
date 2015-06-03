@@ -135,7 +135,29 @@ macro_rules! try_return(
     }}
 );
 
-fn echo(mut req: Request, mut res: Response) {
+fn echo_keepalive(mut req: Request, mut res: Response) {
+    match req.uri {
+        AbsolutePath(ref path) => match (&req.method, &path[..]) {
+            (&Method::Get, "/") | (&Method::Get, "/echo") => {
+                try_return!(res.send(b"Try POST /echo"));
+                return;
+            },
+            (&Method::Post, "/echo") => (), // fall through, fighting mutable borrows
+            _ => {
+                *res.status_mut() = hyper::NotFound;
+                return;
+            }
+        },
+        _ => {
+            return;
+        }
+    };
+
+    let mut res = try_return!(res.start());
+    try_return!(io::copy(&mut req, &mut res));
+}
+
+fn echo_close(mut req: Request, mut res: Response) {
     match req.uri {
         AbsolutePath(ref path) => match (&req.method, &path[..]) {
             (&Method::Get, "/") | (&Method::Get, "/echo") => {
@@ -346,41 +368,28 @@ fn main() {
                     .help("Listening on this address"))
             .arg(Arg::with_name("THREADS").short("t").long("threads").takes_value(true)
                     .help("Number of threads"))
+            .arg(Arg::with_name("KEEPALIVE").short("c").long("keep-alive").takes_value(false)
+                    .help("Keep alive"))
             .get_matches();
 
     let bind_addr = matches.value_of("BIND").unwrap().to_owned();
 
+    let keep_alive = match matches.value_of("KEEPALIVE") {
+        Some(..) => true,
+        None => false,
+    };
+
     Scheduler::spawn(move|| {
-        // let addr = bind_addr.parse().unwrap();
-        // let server = match &addr {
-        //     &SocketAddr::V4(..) => TcpSocket::v4(),
-        //     &SocketAddr::V6(..) => TcpSocket::v6(),
-        // }.unwrap();
-        // server.set_reuseaddr(true).unwrap();
-        // // server.set_reuseport(true).unwrap();
-
-        // server.bind(&addr).unwrap();
-        // let server = server.listen(2048).unwrap();
-
-        // info!("Listening on {:?}", server.local_addr().unwrap());
-
-        // loop {
-        //     let stream = server.accept().unwrap();
-        //     let addr = stream.peer_addr().unwrap();
-        //     info!("Accept connection: {:?}", addr);
-
-        //     Scheduler::spawn(move|| {
-        //         debug!("Begin handling {:?}", addr);
-        //         Worker(&echo).handle_connection(&mut stream);
-        //     });
-        // }
-
         let mut listener = HttpListener::http(&bind_addr[..]).unwrap();
 
         loop {
             let mut stream = listener.accept().unwrap();
 
-            Scheduler::spawn(move|| Worker(&echo).handle_connection(&mut stream));
+            if keep_alive {
+                Scheduler::spawn(move|| Worker(&echo_keepalive).handle_connection(&mut stream));
+            } else {
+                Scheduler::spawn(move|| Worker(&echo_close).handle_connection(&mut stream));
+            }
         }
     });
 
