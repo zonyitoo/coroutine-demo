@@ -312,21 +312,27 @@ impl NetworkStream for HttpStream {
 
     #[inline]
     fn close(&mut self, how: Shutdown) -> io::Result<()> {
-        // #[inline]
-        // fn shutdown(tcp: &mut TcpStream, how: Shutdown) -> io::Result<()> {
-        //     match tcp.shutdown(how) {
-        //         Ok(_) => Ok(()),
-        //         // see https://github.com/hyperium/hyper/issues/508
-        //         Err(ref e) if e.kind() == io::ErrorKind::NotConnected => Ok(()),
-        //         err => err
-        //     }
-        // }
+        #[inline]
+        fn shutdown(tcp: &mut TcpStream, how: Shutdown) -> io::Result<()> {
+            use mio::tcp;
+            let how = match how {
+                Shutdown::Read => tcp::Shutdown::Read,
+                Shutdown::Write => tcp::Shutdown::Write,
+                Shutdown::Both => tcp::Shutdown::Both,
+            };
 
-        // match *self {
-        //     HttpStream::Http(ref mut inner) => shutdown(&mut inner.0, how),
-        //     HttpStream::Https(ref mut inner) => shutdown(&mut inner.get_mut().0, how)
-        // }
-        Ok(())
+            match tcp.shutdown(how) {
+                Ok(_) => Ok(()),
+                // see https://github.com/hyperium/hyper/issues/508
+                Err(ref e) if e.kind() == io::ErrorKind::NotConnected => Ok(()),
+                err => err
+            }
+        }
+
+        match *self {
+            HttpStream::Http(ref mut inner) => shutdown(&mut inner.0, how),
+            HttpStream::Https(ref mut inner) => shutdown(&mut inner.get_mut().0, how)
+        }
     }
 }
 
