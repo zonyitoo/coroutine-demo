@@ -29,6 +29,9 @@ extern crate env_logger;
 extern crate mio;
 extern crate libc;
 extern crate rand;
+extern crate mpmc;
+#[macro_use] extern crate lazy_static;
 
 pub mod scheduler;
 pub mod net;
+pub mod processor;

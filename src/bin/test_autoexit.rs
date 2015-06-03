@@ -3,11 +3,13 @@ extern crate cosupport;
 use cosupport::scheduler::Scheduler;
 
 fn main() {
-    Scheduler::run(|| {
+    Scheduler::spawn(|| {
         Scheduler::spawn(|| {
             println!("Fuck something ...");
         });
 
         println!("Running, going to exit now...");
-    }, 10);
+    });
+
+    Scheduler::run(10);
 }

@@ -26,7 +26,7 @@ use std::ops::{Deref, DerefMut};
 use mio::{self, Interest};
 use mio::buf::{Buf, MutBuf, MutSliceBuf, SliceBuf};
 
-use scheduler::Scheduler;
+use processor::Processor;
 
 pub struct TcpSocket(::mio::tcp::TcpSocket);
 
@@ -95,7 +95,7 @@ impl TcpListener {
             }
         }
 
-        try!(Scheduler::current().wait_event(&self.0, Interest::readable()));
+        try!(Processor::current().wait_event(&self.0, Interest::readable()));
 
         match self.0.accept() {
             Ok(None) => {
@@ -186,7 +186,7 @@ impl io::Read for TcpStream {
         }
 
         debug!("Read: Going to register event");
-        try!(Scheduler::current().wait_event(&self.0, Interest::readable()));
+        try!(Processor::current().wait_event(&self.0, Interest::readable()));
         debug!("Read: Got read event");
 
         while buf.has_remaining() {
@@ -246,7 +246,7 @@ impl io::Write for TcpStream {
         }
 
         debug!("Write: Going to register event");
-        try!(Scheduler::current().wait_event(&self.0, Interest::writable()));
+        try!(Processor::current().wait_event(&self.0, Interest::writable()));
         debug!("Write: Got write event");
 
         while buf.has_remaining() {

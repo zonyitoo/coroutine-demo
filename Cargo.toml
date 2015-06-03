@@ -7,6 +7,10 @@ authors = ["Y. T. Chung <zonyitoo@gmail.com>"]
 name = "cosupport"
 
 [[bin]]
+name = "simple"
+path = "src/bin/simple.rs"
+
+[[bin]]
 name = "tcp-echo"
 path = "src/bin/echoserver.rs"
 
@@ -33,6 +37,7 @@ clap = "*"
 hyper = "*"
 rand = "*"
 openssl = "*"
+lazy_static = "*"
 
 #[dependencies.deque]
 #path = "/Users/zonyitoo/Projects/deque"
@@ -45,3 +50,6 @@ git = "https://github.com/carllerche/mio.git"
 [dependencies.coroutine]
 git = "https://github.com/rustcc/coroutine-rs.git"
 #rev = "b17d2a061a763a43f034a5c491387fc1dd5fd2cf"
+
+[dependencies.bounded-mpmc-queue]
+git = "https://github.com/VHaravy/bounded-mpmc-queue.git"

@@ -139,6 +139,7 @@ fn echo(mut req: Request, mut res: Response) {
     match req.uri {
         AbsolutePath(ref path) => match (&req.method, &path[..]) {
             (&Method::Get, "/") | (&Method::Get, "/echo") => {
+                res.headers_mut().set(Connection::close());
                 try_return!(res.send(b"Try POST /echo"));
                 return;
             },
@@ -343,7 +344,7 @@ fn main() {
 
     let bind_addr = matches.value_of("BIND").unwrap().to_owned();
 
-    Scheduler::run(move|| {
+    Scheduler::spawn(move|| {
         // let addr = bind_addr.parse().unwrap();
         // let server = match &addr {
         //     &SocketAddr::V4(..) => TcpSocket::v4(),
@@ -375,5 +376,7 @@ fn main() {
 
             Scheduler::spawn(move|| Worker(&echo).handle_connection(&mut stream));
         }
-    }, matches.value_of("THREADS").unwrap_or("1").parse().unwrap());
+    });
+
+    Scheduler::run(matches.value_of("THREADS").unwrap_or("1").parse().unwrap());
 }

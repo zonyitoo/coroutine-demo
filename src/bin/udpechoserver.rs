@@ -26,7 +26,7 @@ fn main() {
 
     let bind_addr = matches.value_of("BIND").unwrap().to_owned();
 
-    Scheduler::run(move|| {
+    Scheduler::spawn(move|| {
         let addr = bind_addr.parse().unwrap();
         let server = UdpSocket::bound(&addr).unwrap();
 
@@ -40,5 +40,7 @@ fn main() {
 
             server.send_to(&mut buf, &peer_addr).unwrap();
         }
-    }, matches.value_of("THREADS").unwrap_or("1").parse().unwrap());
+    });
+
+    Scheduler::run(matches.value_of("THREADS").unwrap_or("1").parse().unwrap());
 }
