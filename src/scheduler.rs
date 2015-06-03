@@ -20,29 +20,11 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use std::thread;
-use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
-use std::sync::{Mutex, Once, ONCE_INIT};
-use std::mem;
-use std::cell::{RefCell, UnsafeCell};
-use std::io;
-#[cfg(target_os = "linux")]
-use std::os::unix::io::AsRawFd;
-#[cfg(target_os = "linux")]
-use std::convert::From;
-use std::sync::atomic::{ATOMIC_BOOL_INIT, AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::collections::VecDeque;
-use std::ops::Deref;
 
 use coroutine::spawn;
-use coroutine::coroutine::{State, Handle, Coroutine, Options};
-
-use deque::{BufferPool, Stealer, Worker, Stolen};
-
-use mio::{EventLoop, Evented, Handler, Token, ReadHint, Interest, PollOpt};
-use mio::util::Slab;
-#[cfg(target_os = "linux")]
-use mio::Io;
+use coroutine::coroutine::{Handle, Coroutine};
 
 use mpmc::Queue;
 
