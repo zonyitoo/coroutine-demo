@@ -6,7 +6,7 @@ use std::os::unix::io::AsRawFd;
 use std::convert::From;
 use std::sync::Arc;
 
-use coroutine::coroutine::{State, Handle, Coroutine};
+use coroutine::{State, Handle, Coroutine};
 
 use mio::{EventLoop, Evented, Handler, Token, ReadHint, Interest, PollOpt};
 use mio::util::Slab;
@@ -47,19 +47,17 @@ impl Processor {
             match self.work_queue.try_dequeue() {
                 Some(hdl) => {
                     match hdl.resume() {
-                        Ok(..) => {
-                            match hdl.state() {
-                                State::Suspended => {
-                                    Scheduler::ready(hdl);
-                                },
-                                State::Finished | State::Panicked => {
-                                    Scheduler::finished(hdl);
-                                }
-                                _ => {}
-                            }
+                        Ok(State::Suspended) => {
+                            Scheduler::ready(hdl);
                         },
+                        Ok(State::Finished) | Ok(State::Panicked) => {
+                            Scheduler::finished(hdl);
+                        },
+                        Ok(State::Blocked) => (),
+                        Ok(..) => unreachable!(),
                         Err(err) => {
                             error!("Coroutine resume failed, {:?}", err);
+                            Scheduler::finished(hdl);
                         }
                     }
                 },
@@ -89,7 +87,7 @@ impl IoHandler {
           target_os = "android"))]
 impl Processor {
     pub fn wait_event<E: Evented + AsRawFd>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
-        let token = self.handler.slabs.insert((Coroutine::current(), From::from(fd.as_raw_fd()))).unwrap();
+        let token = self.handler.slabs.insert((Coroutine::current().clone(), From::from(fd.as_raw_fd()))).unwrap();
         try!(self.event_loop.register_opt(fd, token, interest,
                                          PollOpt::level()|PollOpt::oneshot()));
 
@@ -158,7 +156,7 @@ impl Handler for IoHandler {
           target_os = "openbsd"))]
 impl Processor {
     pub fn wait_event<E: Evented>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
-        let token = self.handler.slabs.insert(Coroutine::current()).unwrap();
+        let token = self.handler.slabs.insert(Coroutine::current().clone()).unwrap();
         try!(self.event_loop.register_opt(fd, token, interest,
                                          PollOpt::level()|PollOpt::oneshot()));
 
