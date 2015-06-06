@@ -5,6 +5,7 @@ use std::os::unix::io::AsRawFd;
 #[cfg(target_os = "linux")]
 use std::convert::From;
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
+use std::thread;
 
 use coroutine::{State, Handle, Coroutine};
 
@@ -108,6 +109,24 @@ impl Processor {
                         break;
                     }
                 }
+                // match self.queue_worker.pop() {
+                //     Some(hdl) => {
+                //         match hdl.resume() {
+                //             Ok(State::Suspended) => {
+                //                 Processor::current().ready(hdl);
+                //             },
+                //             Ok(State::Finished) | Ok(State::Panicked) => {
+                //                 Scheduler::finished(hdl);
+                //             },
+                //             Ok(State::Blocked) => (),
+                //             Ok(..) => unreachable!(),
+                //             Err(err) => {
+                //                 error!("Coroutine resume error {:?}", err);
+                //             }
+                //         }
+                //     },
+                //     None => break,
+                // }
             }
 
             if self.handler.slabs.count() != 0 {
@@ -148,6 +167,8 @@ impl Processor {
             if Scheduler::get().work_count() == 0 {
                 break;
             }
+
+            thread::sleep_ms(100);
         }
 
         Ok(())
