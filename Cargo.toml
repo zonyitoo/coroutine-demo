@@ -49,7 +49,7 @@ git = "https://github.com/carllerche/mio.git"
 
 [dependencies.coroutine]
 git = "https://github.com/rustcc/coroutine-rs.git"
-#rev = "b17d2a061a763a43f034a5c491387fc1dd5fd2cf"
+rev = "69cf20af3d5741f1209e62d8fcb312cd2d73cc40"
 
 [dependencies.bounded-mpmc-queue]
 git = "https://github.com/VHaravy/bounded-mpmc-queue.git"

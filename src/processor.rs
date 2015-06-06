@@ -6,7 +6,7 @@ use std::os::unix::io::AsRawFd;
 use std::convert::From;
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 
-use coroutine::coroutine::{State, Handle, Coroutine};
+use coroutine::{State, Handle, Coroutine};
 
 use mio::{EventLoop, Evented, Handler, Token, ReadHint, Interest, PollOpt};
 use mio::util::Slab;
@@ -85,49 +85,63 @@ impl Processor {
                 try!(self.event_loop.run_once(&mut self.handler));
             }
 
-            let mut need_steal = false;
             loop {
                 match self.queue_stealer.steal() {
                     Stolen::Data(hdl) => {
                         match hdl.resume() {
-                            Ok(..) => {
-                                match hdl.state() {
-                                    State::Suspended => {
-                                        self.ready(hdl);
-                                    },
-                                    State::Finished | State::Panicked => {
-                                        Scheduler::finished(hdl);
-                                    },
-                                    _ => {}
-                                }
+                            Ok(State::Suspended) => {
+                                Processor::current().ready(hdl);
                             },
+                            Ok(State::Finished) | Ok(State::Panicked) => {
+                                Scheduler::finished(hdl);
+                            },
+                            Ok(State::Blocked) => (),
+                            Ok(..) => unreachable!(),
                             Err(err) => {
                                 error!("Coroutine resume error {:?}", err);
                             }
                         }
-                        break;
+                        // break;
                     },
                     Stolen::Abort => {},
                     Stolen::Empty => {
-                        need_steal = true;
                         break;
                     }
                 }
             }
 
-            if !need_steal || self.handler.slabs.count() != 0 {
+            if self.handler.slabs.count() != 0 {
                 continue;
             }
 
             if !self.neighbors.is_empty() {
                 let rand_idx = random::<usize>() % self.neighbors.len();
-                match self.neighbors[rand_idx].1.steal_half(&mut self.steal_buffer) {
-                    Some(n) => {
-                        debug!("Stolen {} coroutines", n);
-                        self.queue_worker.push_all(&mut self.steal_buffer);
+                // match self.neighbors[rand_idx].1.steal_half(&mut self.steal_buffer) {
+                //     Some(n) => {
+                //         debug!("Stolen {} coroutines", n);
+                //         self.queue_worker.push_all(&mut self.steal_buffer);
+                //         continue;
+                //     },
+                //     None => {}
+                // }
+                match self.neighbors[rand_idx].1.steal() {
+                    Stolen::Data(hdl) => {
+                        match hdl.resume() {
+                            Ok(State::Suspended) => {
+                                Processor::current().ready(hdl);
+                            },
+                            Ok(State::Finished) | Ok(State::Panicked) => {
+                                Scheduler::finished(hdl);
+                            },
+                            Ok(State::Blocked) => (),
+                            Ok(..) => unreachable!(),
+                            Err(err) => {
+                                error!("Coroutine resume error {:?}", err);
+                            }
+                        }
                         continue;
                     },
-                    None => {}
+                    _ => {}
                 }
             }
 
@@ -154,7 +168,7 @@ impl IoHandler {
           target_os = "android"))]
 impl Processor {
     pub fn wait_event<E: Evented + AsRawFd>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
-        let token = self.handler.slabs.insert((Coroutine::current(), From::from(fd.as_raw_fd()))).unwrap();
+        let token = self.handler.slabs.insert((Coroutine::current().clone(), From::from(fd.as_raw_fd()))).unwrap();
         try!(self.event_loop.register_opt(fd, token, interest,
                                          PollOpt::level()|PollOpt::oneshot()));
 
@@ -223,7 +237,7 @@ impl Handler for IoHandler {
           target_os = "openbsd"))]
 impl Processor {
     pub fn wait_event<E: Evented>(&mut self, fd: &E, interest: Interest) -> io::Result<()> {
-        let token = self.handler.slabs.insert(Coroutine::current()).unwrap();
+        let token = self.handler.slabs.insert(Coroutine::current().clone()).unwrap();
         try!(self.event_loop.register_opt(fd, token, interest,
                                          PollOpt::level()|PollOpt::oneshot()));
 
