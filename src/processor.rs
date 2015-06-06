@@ -5,6 +5,7 @@ use std::os::unix::io::AsRawFd;
 #[cfg(target_os = "linux")]
 use std::convert::From;
 use std::sync::Arc;
+use std::thread;
 
 use coroutine::{State, Handle, Coroutine};
 
@@ -64,6 +65,9 @@ impl Processor {
                 None => {
                     if Scheduler::get().work_count() == 0 {
                         break;
+                    }
+                    if self.handler.slabs.count() == 0 {
+                        thread::sleep_ms(100);
                     }
                 }
             }
