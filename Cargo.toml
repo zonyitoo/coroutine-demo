@@ -29,7 +29,7 @@ path = "src/bin/udpechoserver.rs"
 [dependencies]
 #coroutine = "*"
 num_cpus = "*"
-#deque = "*"
+deque = "*"
 log = "*"
 env_logger = "*"
 #mio = "*"
@@ -39,8 +39,8 @@ rand = "*"
 openssl = "*"
 lazy_static = "*"
 
-[dependencies.deque]
-git = "https://github.com/zonyitoo/deque.git"
+#[dependencies.deque]
+#git = "https://github.com/zonyitoo/deque.git"
 
 [dependencies.mio]
 git = "https://github.com/carllerche/mio.git"

@@ -71,6 +71,7 @@ impl Processor {
     }
 
     pub fn schedule(&mut self) -> io::Result<()> {
+        'schedloop:
         loop {
             match self.message_receiver.try_recv() {
                 Ok(SchedMessage::NewNeighbor(handle)) => {
@@ -134,41 +135,52 @@ impl Processor {
             }
 
             if !self.neighbors.is_empty() {
-                let rand_idx = random::<usize>() % self.neighbors.len();
-                // match self.neighbors[rand_idx].1.steal_half(&mut self.steal_buffer) {
-                //     Some(n) => {
-                //         debug!("Stolen {} coroutines", n);
-                //         self.queue_worker.push_all(&mut self.steal_buffer);
-                //         continue;
-                //     },
-                //     None => {}
-                // }
-                match self.neighbors[rand_idx].1.steal() {
-                    Stolen::Data(hdl) => {
-                        match hdl.resume() {
-                            Ok(State::Suspended) => {
-                                Processor::current().ready(hdl);
-                            },
-                            Ok(State::Finished) | Ok(State::Panicked) => {
-                                Scheduler::finished(hdl);
-                            },
-                            Ok(State::Blocked) => (),
-                            Ok(..) => unreachable!(),
-                            Err(err) => {
-                                error!("Coroutine resume error {:?}", err);
+                let mut loop_times = 0;
+                loop {
+                    let rand_idx = random::<usize>() % self.neighbors.len();
+                    // match self.neighbors[rand_idx].1.steal_half(&mut self.steal_buffer) {
+                    //     Some(n) => {
+                    //         debug!("Stolen {} coroutines", n);
+                    //         self.queue_worker.push_all(&mut self.steal_buffer);
+                    //         continue;
+                    //     },
+                    //     None => {}
+                    // }
+                    match self.neighbors[rand_idx].1.steal() {
+                        Stolen::Data(hdl) => {
+                            match hdl.resume() {
+                                Ok(State::Suspended) => {
+                                    Processor::current().ready(hdl);
+                                },
+                                Ok(State::Finished) | Ok(State::Panicked) => {
+                                    Scheduler::finished(hdl);
+                                },
+                                Ok(State::Blocked) => (),
+                                Ok(..) => unreachable!(),
+                                Err(err) => {
+                                    error!("Coroutine resume error {:?}", err);
+                                }
                             }
+                            debug!("Steal one coroutine!! {:?}", thread::current());
+                            break;
+                        },
+                        _ => {}
+                    }
+
+                    loop_times += 1;
+
+                    if loop_times >= self.neighbors.len() {
+                        if Scheduler::get().work_count() == 0 {
+                            break 'schedloop;
+                        } else {
+                            thread::sleep_ms(100);
+                            loop_times = 0;
                         }
-                        continue;
-                    },
-                    _ => {}
+                    }
                 }
+            } else if Scheduler::get().work_count() == 0 {
+                break 'schedloop;
             }
-
-            if Scheduler::get().work_count() == 0 {
-                break;
-            }
-
-            thread::sleep_ms(100);
         }
 
         Ok(())
