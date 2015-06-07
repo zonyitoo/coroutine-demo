@@ -41,15 +41,14 @@ impl Processor {
 
         let neighbors = {
             let mut neigh = Scheduler::get().processors().lock().unwrap();
-
-            for &(ref ntx, _) in neigh.iter() {
-                let _ = ntx.send(SchedMessage::NewNeighbor((tx.clone(), s.clone())));
-            }
-
             let cloned = neigh.clone();
-            neigh.push((tx, s.clone()));
+            neigh.push((tx.clone(), s.clone()));
             cloned
         };
+
+        for &(ref ntx, _) in neighbors.iter() {
+            let _ = ntx.send(SchedMessage::NewNeighbor((tx.clone(), s.clone())));
+        }
 
         Processor {
             event_loop: EventLoop::new().unwrap(),
