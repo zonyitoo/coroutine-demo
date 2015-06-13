@@ -134,18 +134,11 @@ impl Processor {
             }
 
             if !self.neighbors.is_empty() {
-                let mut loop_times = 0;
-                loop {
-                    let rand_idx = random::<usize>() % self.neighbors.len();
-                    // match self.neighbors[rand_idx].1.steal_half(&mut self.steal_buffer) {
-                    //     Some(n) => {
-                    //         debug!("Stolen {} coroutines", n);
-                    //         self.queue_worker.push_all(&mut self.steal_buffer);
-                    //         continue;
-                    //     },
-                    //     None => {}
-                    // }
-                    match self.neighbors[rand_idx].1.steal() {
+                let steal_index = random::<usize>() % self.neighbors.len();
+
+                let mut got_work = false;
+                for idx in (0..self.neighbors.len()).map(|i| (i + steal_index) % self.neighbors.len()) {
+                    match self.neighbors[idx].1.steal() {
                         Stolen::Data(hdl) => {
                             match hdl.resume() {
                                 Ok(State::Suspended) => {
@@ -161,20 +154,18 @@ impl Processor {
                                 }
                             }
                             debug!("Steal one coroutine!! {:?}", thread::current());
+                            got_work = true;
                             break;
                         },
                         _ => {}
                     }
+                }
 
-                    loop_times += 1;
-
-                    if loop_times >= self.neighbors.len() {
-                        if Scheduler::get().work_count() == 0 {
-                            break 'schedloop;
-                        } else {
-                            thread::sleep_ms(100);
-                            loop_times = 0;
-                        }
+                if !got_work {
+                    if Scheduler::get().work_count() == 0 {
+                        break 'schedloop;
+                    } else {
+                        thread::sleep_ms(100);
                     }
                 }
             } else if Scheduler::get().work_count() == 0 {

@@ -27,7 +27,7 @@ name = "udp-echo"
 path = "src/bin/udpechoserver.rs"
 
 [dependencies]
-#coroutine = "*"
+coroutine = "*"
 num_cpus = "*"
 deque = "*"
 log = "*"
@@ -47,9 +47,9 @@ git = "https://github.com/carllerche/mio.git"
 #path = "/Users/zonyitoo/Projects/mio"
 #git = "https://github.com/zonyitoo/mio.git"
 
-[dependencies.coroutine]
-git = "https://github.com/rustcc/coroutine-rs.git"
-rev = "69cf20af3d5741f1209e62d8fcb312cd2d73cc40"
+#[dependencies.coroutine]
+#git = "https://github.com/rustcc/coroutine-rs.git"
+#rev = "69cf20af3d5741f1209e62d8fcb312cd2d73cc40"
 
 [dependencies.bounded-mpmc-queue]
 git = "https://github.com/VHaravy/bounded-mpmc-queue.git"
