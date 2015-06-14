@@ -155,10 +155,16 @@ pub struct TcpStream(mio::tcp::TcpStream);
 
 impl TcpStream {
     pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
-        // let stream = try!(mio::tcp::TcpStream::connect(addr));
+        match TcpSocket::connect(addr) {
+            Ok((stream, completed)) => {
+                if !completed {
+                    try!(Processor::current().wait_event(&stream.0, Interest::writable()));
+                }
 
-        // Ok(TcpStream(stream))
-        super::each_addr(addr, ::mio::tcp::TcpStream::connect).map(TcpStream)
+                Ok(stream)
+            },
+            Err(err) => Err(err)
+        }
     }
 
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
