@@ -131,6 +131,26 @@ impl DerefMut for TcpListener {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Shutdown {
+    /// Further receptions will be disallowed.
+    Read,
+    /// Further  transmissions will be disallowed.
+    Write,
+    /// Further receptions and transmissions will be disallowed.
+    Both,
+}
+
+impl From<Shutdown> for mio::tcp::Shutdown {
+    fn from(shutdown: Shutdown) -> mio::tcp::Shutdown {
+        match shutdown {
+            Shutdown::Read => mio::tcp::Shutdown::Read,
+            Shutdown::Write => mio::tcp::Shutdown::Write,
+            Shutdown::Both => mio::tcp::Shutdown::Both,
+        }
+    }
+}
+
 pub struct TcpStream(mio::tcp::TcpStream);
 
 impl TcpStream {
@@ -153,6 +173,10 @@ impl TcpStream {
         let stream = try!(self.0.try_clone());
 
         Ok(TcpStream(stream))
+    }
+
+    pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
+        self.0.shutdown(From::from(how))
     }
 }
 
