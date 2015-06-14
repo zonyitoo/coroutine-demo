@@ -165,7 +165,7 @@ impl Processor {
                     if Scheduler::get().work_count() == 0 {
                         break 'schedloop;
                     } else {
-                        thread::sleep_ms(100);
+                        thread::sleep_ms(10);
                     }
                 }
             } else if Scheduler::get().work_count() == 0 {

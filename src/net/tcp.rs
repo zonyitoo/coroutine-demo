@@ -95,17 +95,19 @@ impl TcpListener {
             }
         }
 
-        try!(Processor::current().wait_event(&self.0, Interest::readable()));
+        loop {
+            try!(Processor::current().wait_event(&self.0, Interest::readable()));
 
-        match self.0.accept() {
-            Ok(None) => {
-                panic!("accept WouldBlock; Coroutine was awaked by readable event");
-            },
-            Ok(Some(stream)) => {
-                Ok(TcpStream(stream))
-            },
-            Err(err) => {
-                Err(err)
+            match self.0.accept() {
+                Ok(None) => {
+                    warn!("accept WouldBlock; Coroutine was awaked by readable event");
+                },
+                Ok(Some(stream)) => {
+                    return Ok(TcpStream(stream));
+                },
+                Err(err) => {
+                    return Err(err);
+                }
             }
         }
     }
