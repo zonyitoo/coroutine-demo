@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use coroutine::spawn;
-use coroutine::coroutine::{Handle, Coroutine};
+use coroutine::{Handle, Coroutine, Options};
 
 use mpmc::Queue;
 
@@ -73,8 +73,18 @@ impl Scheduler {
     }
 
     pub fn spawn<F>(f: F)
-            where F: FnOnce() + 'static + Send {
+        where F: FnOnce() + 'static + Send
+    {
         let coro = Coroutine::spawn(f);
+        Scheduler::get().work_counts.fetch_add(1, Ordering::SeqCst);
+        Scheduler::ready(coro);
+        Coroutine::sched();
+    }
+
+    pub fn spawn_opts<F>(f: F, opts: Options)
+        where F: FnOnce() + 'static + Send
+    {
+        let coro = Coroutine::spawn_opts(f, opts);
         Scheduler::get().work_counts.fetch_add(1, Ordering::SeqCst);
         Scheduler::ready(coro);
         Coroutine::sched();
@@ -82,15 +92,16 @@ impl Scheduler {
 
     pub fn run(procs: usize) {
         let mut futs = Vec::new();
-        for _ in 0..procs-1 {
+        for _ in 0..procs {
             let fut = thread::spawn(|| {
-                Processor::current().schedule().unwrap();
+                match Processor::current().schedule() {
+                    Ok(..) => {},
+                    Err(err) => panic!("Processor schedule error: {:?}", err),
+                }
             });
 
             futs.push(fut);
         }
-
-        Processor::current().schedule().unwrap();
 
         for fut in futs.into_iter() {
             fut.join().unwrap();
