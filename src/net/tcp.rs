@@ -22,12 +22,14 @@
 use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
 use std::ops::{Deref, DerefMut};
+use std::convert::From;
 
 use mio::{self, Interest};
 use mio::buf::{Buf, MutBuf, MutSliceBuf, SliceBuf};
 
 use processor::Processor;
 
+#[derive(Debug)]
 pub struct TcpSocket(::mio::tcp::TcpSocket);
 
 impl TcpSocket {
@@ -42,9 +44,6 @@ impl TcpSocket {
     }
 
     pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<(TcpStream, bool)> {
-        // let (stream, complete) = try!(self.0.connect(addr));
-        // Ok((TcpStream(stream), complete))
-
         super::each_addr(addr, |a| {
             match a {
                 &SocketAddr::V4(..) => try!(TcpSocket::v4()).0.connect(a),
@@ -72,13 +71,11 @@ impl DerefMut for TcpSocket {
     }
 }
 
+#[derive(Debug)]
 pub struct TcpListener(::mio::tcp::TcpListener);
 
 impl TcpListener {
     pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListener> {
-        // let listener = try!(::mio::tcp::TcpListener::bind(addr));
-
-        // Ok(TcpListener(listener))
         super::each_addr(addr, ::mio::tcp::TcpListener::bind).map(TcpListener)
     }
 
@@ -95,17 +92,19 @@ impl TcpListener {
             }
         }
 
-        try!(Processor::current().wait_event(&self.0, Interest::readable()));
+        loop {
+            try!(Processor::current().wait_event(&self.0, Interest::readable()));
 
-        match self.0.accept() {
-            Ok(None) => {
-                panic!("accept WouldBlock; Coroutine was awaked by readable event");
-            },
-            Ok(Some(stream)) => {
-                Ok(TcpStream(stream))
-            },
-            Err(err) => {
-                Err(err)
+            match self.0.accept() {
+                Ok(None) => {
+                    warn!("accept WouldBlock; Coroutine was awaked by readable event");
+                },
+                Ok(Some(stream)) => {
+                    return Ok(TcpStream(stream));
+                },
+                Err(err) => {
+                    return Err(err);
+                }
             }
         }
     }
@@ -129,14 +128,42 @@ impl DerefMut for TcpListener {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Shutdown {
+    /// Further receptions will be disallowed.
+    Read,
+    /// Further  transmissions will be disallowed.
+    Write,
+    /// Further receptions and transmissions will be disallowed.
+    Both,
+}
+
+impl From<Shutdown> for mio::tcp::Shutdown {
+    fn from(shutdown: Shutdown) -> mio::tcp::Shutdown {
+        match shutdown {
+            Shutdown::Read => mio::tcp::Shutdown::Read,
+            Shutdown::Write => mio::tcp::Shutdown::Write,
+            Shutdown::Both => mio::tcp::Shutdown::Both,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct TcpStream(mio::tcp::TcpStream);
 
 impl TcpStream {
     pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
-        // let stream = try!(mio::tcp::TcpStream::connect(addr));
+        match TcpSocket::connect(addr) {
+            Ok((stream, completed)) => {
+                if !completed {
+                    try!(Processor::current().wait_event(&stream.0, Interest::writable()));
+                    try!(stream.take_socket_error());
+                }
 
-        // Ok(TcpStream(stream))
-        super::each_addr(addr, ::mio::tcp::TcpStream::connect).map(TcpStream)
+                Ok(stream)
+            },
+            Err(err) => Err(err)
+        }
     }
 
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
@@ -151,6 +178,14 @@ impl TcpStream {
         let stream = try!(self.0.try_clone());
 
         Ok(TcpStream(stream))
+    }
+
+    pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
+        self.0.shutdown(From::from(how))
+    }
+
+    pub fn take_socket_error(&self) -> io::Result<()> {
+        self.0.take_socket_error()
     }
 }
 
