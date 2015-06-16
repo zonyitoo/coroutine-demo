@@ -37,10 +37,10 @@ fn main() {
 
         info!("Listening on {:?}", server.local_addr().unwrap());
 
-        loop {
+        for stream in server.incoming() {
             use std::io::{Read, Write};
 
-            let mut stream = server.accept().unwrap();
+            let mut stream = stream.unwrap();
             info!("Accept connection: {:?}", stream.peer_addr().unwrap());
 
             Scheduler::spawn(move|| {
