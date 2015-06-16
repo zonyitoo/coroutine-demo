@@ -75,8 +75,8 @@ impl Scheduler {
     pub fn spawn<F>(f: F)
             where F: FnOnce() + 'static + Send {
         let coro = Coroutine::spawn(f);
-        Scheduler::ready(coro);
         Scheduler::get().work_counts.fetch_add(1, Ordering::SeqCst);
+        Scheduler::ready(coro);
         Coroutine::sched();
     }
 
