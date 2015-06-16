@@ -23,6 +23,7 @@ use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::convert::From;
+use std::iter::Iterator;
 
 use mio::{self, Interest};
 use mio::buf::{Buf, MutBuf, MutSliceBuf, SliceBuf};
@@ -112,6 +113,10 @@ impl TcpListener {
     pub fn try_clone(&self) -> io::Result<TcpListener> {
         Ok(TcpListener(try!(self.0.try_clone())))
     }
+
+    pub fn incoming<'a>(&'a self) -> Incoming<'a> {
+        Incoming(self)
+    }
 }
 
 impl Deref for TcpListener {
@@ -125,6 +130,16 @@ impl Deref for TcpListener {
 impl DerefMut for TcpListener {
     fn deref_mut(&mut self) -> &mut ::mio::tcp::TcpListener {
         &mut self.0
+    }
+}
+
+pub struct Incoming<'a>(&'a TcpListener);
+
+impl<'a> Iterator for Incoming<'a> {
+    type Item = io::Result<TcpStream>;
+
+    fn next(&mut self) -> Option<io::Result<TcpStream>> {
+        Some(self.0.accept())
     }
 }
 
