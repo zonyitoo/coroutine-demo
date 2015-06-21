@@ -22,12 +22,14 @@
 use std::io;
 use std::net::{ToSocketAddrs, SocketAddr};
 use std::ops::{Deref, DerefMut};
+use std::convert::From;
+use std::iter::Iterator;
 
 use mio::{self, Interest};
-use mio::buf::{Buf, MutBuf, MutSliceBuf, SliceBuf};
 
 use processor::Processor;
 
+#[derive(Debug)]
 pub struct TcpSocket(::mio::tcp::TcpSocket);
 
 impl TcpSocket {
@@ -42,9 +44,6 @@ impl TcpSocket {
     }
 
     pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<(TcpStream, bool)> {
-        // let (stream, complete) = try!(self.0.connect(addr));
-        // Ok((TcpStream(stream), complete))
-
         super::each_addr(addr, |a| {
             match a {
                 &SocketAddr::V4(..) => try!(TcpSocket::v4()).0.connect(a),
@@ -72,13 +71,11 @@ impl DerefMut for TcpSocket {
     }
 }
 
+#[derive(Debug)]
 pub struct TcpListener(::mio::tcp::TcpListener);
 
 impl TcpListener {
     pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListener> {
-        // let listener = try!(::mio::tcp::TcpListener::bind(addr));
-
-        // Ok(TcpListener(listener))
         super::each_addr(addr, ::mio::tcp::TcpListener::bind).map(TcpListener)
     }
 
@@ -115,6 +112,10 @@ impl TcpListener {
     pub fn try_clone(&self) -> io::Result<TcpListener> {
         Ok(TcpListener(try!(self.0.try_clone())))
     }
+
+    pub fn incoming<'a>(&'a self) -> Incoming<'a> {
+        Incoming(self)
+    }
 }
 
 impl Deref for TcpListener {
@@ -128,6 +129,16 @@ impl Deref for TcpListener {
 impl DerefMut for TcpListener {
     fn deref_mut(&mut self) -> &mut ::mio::tcp::TcpListener {
         &mut self.0
+    }
+}
+
+pub struct Incoming<'a>(&'a TcpListener);
+
+impl<'a> Iterator for Incoming<'a> {
+    type Item = io::Result<TcpStream>;
+
+    fn next(&mut self) -> Option<io::Result<TcpStream>> {
+        Some(self.0.accept())
     }
 }
 
@@ -151,6 +162,7 @@ impl From<Shutdown> for mio::tcp::Shutdown {
     }
 }
 
+#[derive(Debug)]
 pub struct TcpStream(mio::tcp::TcpStream);
 
 impl TcpStream {
@@ -159,6 +171,7 @@ impl TcpStream {
             Ok((stream, completed)) => {
                 if !completed {
                     try!(Processor::current().wait_event(&stream.0, Interest::writable()));
+                    try!(stream.take_socket_error());
                 }
 
                 Ok(stream)
@@ -184,64 +197,55 @@ impl TcpStream {
     pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
         self.0.shutdown(From::from(how))
     }
+
+    pub fn take_socket_error(&self) -> io::Result<()> {
+        self.0.take_socket_error()
+    }
 }
 
 impl io::Read for TcpStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         use mio::TryRead;
 
-        let mut buf = MutSliceBuf::wrap(buf);
-        let mut total_len = 0;
-        while buf.has_remaining() {
-            match self.0.try_read_buf(&mut buf) {
+        match self.0.try_read(buf) {
+            Ok(None) => {
+                debug!("TcpStream read WouldBlock");
+            },
+            Ok(Some(0)) => {
+                debug!("TcpStream read 0 bytes; may be EOF");
+                return Ok(0);
+            },
+            Ok(Some(len)) => {
+                debug!("TcpStream read {} bytes", len);
+                return Ok(len);
+            },
+            Err(err) => {
+                return Err(err);
+            }
+        }
+
+        loop {
+            debug!("Read: Going to register event");
+            try!(Processor::current().wait_event(&self.0, Interest::readable()));
+            debug!("Read: Got read event");
+
+            match self.0.try_read(buf) {
                 Ok(None) => {
                     debug!("TcpStream read WouldBlock");
-                    break;
                 },
                 Ok(Some(0)) => {
                     debug!("TcpStream read 0 bytes; may be EOF");
-                    return Ok(total_len);
+                    return Ok(0);
                 },
                 Ok(Some(len)) => {
                     debug!("TcpStream read {} bytes", len);
-                    total_len += len;
+                    return Ok(len);
                 },
                 Err(err) => {
                     return Err(err);
                 }
             }
         }
-
-        if total_len != 0 {
-            // We got something, just return!
-            return Ok(total_len);
-        }
-
-        debug!("Read: Going to register event");
-        try!(Processor::current().wait_event(&self.0, Interest::readable()));
-        debug!("Read: Got read event");
-
-        while buf.has_remaining() {
-            match self.0.try_read_buf(&mut buf) {
-                Ok(None) => {
-                    debug!("TcpStream read WouldBlock");
-                    break;
-                },
-                Ok(Some(0)) => {
-                    debug!("TcpStream read 0 bytes; may be EOF");
-                    break;
-                },
-                Ok(Some(len)) => {
-                    debug!("TcpStream read {} bytes", len);
-                    total_len += len;
-                },
-                Err(err) => {
-                    return Err(err);
-                }
-            }
-        }
-
-        Ok(total_len)
     }
 }
 
@@ -249,59 +253,45 @@ impl io::Write for TcpStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         use mio::TryWrite;
 
-        let mut buf = SliceBuf::wrap(buf);
-        let mut total_len = 0;
+        match self.0.try_write(buf) {
+            Ok(None) => {
+                debug!("TcpStream write WouldBlock");
+            },
+            Ok(Some(0)) => {
+                debug!("TcpStream write 0 bytes; may be EOF");
+                return Ok(0);
+            },
+            Ok(Some(len)) => {
+                debug!("TcpStream written {} bytes", len);
+                return Ok(len);
+            },
+            Err(err) => {
+                return Err(err)
+            }
+        }
 
-        while buf.has_remaining() {
-            match self.0.try_write_buf(&mut buf) {
+        loop {
+            debug!("Write: Going to register event");
+            try!(Processor::current().wait_event(&self.0, Interest::writable()));
+            debug!("Write: Got write event");
+
+            match self.0.try_write(buf) {
                 Ok(None) => {
                     debug!("TcpStream write WouldBlock");
-                    break;
                 },
                 Ok(Some(0)) => {
                     debug!("TcpStream write 0 bytes; may be EOF");
-                    return Ok(total_len);
+                    return Ok(0);
                 },
                 Ok(Some(len)) => {
                     debug!("TcpStream written {} bytes", len);
-                    total_len += len;
+                    return Ok(len);
                 },
                 Err(err) => {
                     return Err(err)
                 }
             }
         }
-
-        if total_len != 0 {
-            // We have written something, return it!
-            return Ok(total_len)
-        }
-
-        debug!("Write: Going to register event");
-        try!(Processor::current().wait_event(&self.0, Interest::writable()));
-        debug!("Write: Got write event");
-
-        while buf.has_remaining() {
-            match self.0.try_write_buf(&mut buf) {
-                Ok(None) => {
-                    debug!("TcpStream write WouldBlock");
-                    break;
-                },
-                Ok(Some(0)) => {
-                    debug!("TcpStream write 0 bytes; may be EOF");
-                    break;
-                },
-                Ok(Some(len)) => {
-                    debug!("TcpStream written {} bytes", len);
-                    total_len += len;
-                },
-                Err(err) => {
-                    return Err(err)
-                }
-            }
-        }
-
-        Ok(total_len)
     }
 
     fn flush(&mut self) -> io::Result<()> {
